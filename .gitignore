@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.log
+npm-debug.log*
+.DS_Store
+uploads/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+backend/public/
+backend/dist/
