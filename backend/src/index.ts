@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
+import fs from 'fs';
 
 import config from './config';
 import { initializeDatabase, closePool } from './database/connection';
@@ -88,7 +89,11 @@ async function startServer(): Promise<void> {
   });
 
   // Static frontend
-  const publicDir = path.resolve(__dirname, '..', 'public');
+  // In Docker: __dirname is /app/dist, frontend is at /app/dist/public
+  // In dev: __dirname is backend/src (via tsx), frontend is at backend/public
+  const publicDir = fs.existsSync(path.resolve(__dirname, 'public'))
+    ? path.resolve(__dirname, 'public')
+    : path.resolve(__dirname, '..', 'public');
 
   // Assets have content hashes — cache forever
   app.use('/assets', express.static(path.join(publicDir, 'assets'), {
