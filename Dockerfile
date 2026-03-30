@@ -12,7 +12,7 @@ WORKDIR /app/backend
 COPY backend/package*.json ./
 RUN npm ci
 COPY backend/ ./
-RUN NODE_OPTIONS="--max-old-space-size=1536" npx tsc
+RUN npx tsc --skipLibCheck
 
 # Stage 3: Production
 FROM node:20-alpine AS production
