@@ -1,0 +1,73 @@
+name: Deploy JARVIS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        run: cd backend && npm ci
+
+      - name: Compile backend
+        run: cd backend && npx tsc --skipLibCheck
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: cd frontend && npm run build
+
+      - name: Assemble deployment
+        run: |
+          mkdir -p backend/dist/public
+          cp -r frontend/dist/* backend/dist/public/
+          cp backend/src/database/init.sql backend/dist/database/
+          tar czf deploy.tar.gz backend/dist/ backend/package.json backend/package-lock.json
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload to S3
+        run: aws s3 cp deploy.tar.gz s3://jarvis-deploy-1774901798/jarvis-deploy.tar.gz
+
+      - name: Deploy to EC2
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["cd /home/ec2-user/jarvis-app && aws s3 cp s3://jarvis-deploy-1774901798/jarvis-deploy.tar.gz . && tar xzf jarvis-deploy.tar.gz && cd backend && npm ci --omit=dev 2>&1 | tail -3 && pkill -f \"node dist/index.js\" 2>/dev/null; sleep 2 && nohup node dist/index.js > /home/ec2-user/jarvis.log 2>&1 & sleep 5 && curl -sf http://localhost:3000/api/health && echo DEPLOY_SUCCESS"],"executionTimeout":["120"]}' \
+            --timeout-seconds 120 \
+            --query "Command.CommandId" --output text)
+
+          echo "Command: $CMD_ID"
+          sleep 30
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$CMD_ID" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "Status" --output text)
+
+          echo "Status: $STATUS"
+
+          if [ "$STATUS" = "Failed" ]; then
+            aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+              --query "StandardErrorContent" --output text
+            exit 1
+          fi
+
+          echo "Deployed successfully to http://54.84.209.149:3000"
