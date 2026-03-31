@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
 import { auth } from './services/api';
+import { configureCognito } from './services/cognitoAuth';
 import { useKeyboardShortcut } from './hooks/useKeyboardShortcut';
 
 // ── Layout & UI ─────────────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ const Transactions = lazy(() => import('./pages/Transactions'));
 const CsvUpload = lazy(() => import('./pages/CsvUpload'));
 const Commissions = lazy(() => import('./pages/Commissions'));
 const JarvisChat = lazy(() => import('./pages/JarvisChat'));
+const PricingCalculator = lazy(() => import('./pages/PricingCalculator'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Login = lazy(() => import('./pages/Login'));
 
@@ -124,6 +126,7 @@ const routeConfig = [
   { path: '/csv-upload', element: <CsvUpload />, title: 'Statement Import' },
   { path: '/commissions', element: <Commissions />, title: 'Commissions' },
   { path: '/jarvis', element: <JarvisChat />, title: 'JARVIS AI' },
+  { path: '/pricing', element: <PricingCalculator />, title: 'Pricing Calculator' },
   { path: '/settings', element: <Settings />, title: 'Settings' },
 ];
 
@@ -178,17 +181,28 @@ function App() {
   const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('jarvis_token');
-    if (!token) {
-      setAuthState('unauthenticated');
-      return;
-    }
+    // Fetch auth config first so Cognito is configured before token verification
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(cfg => {
+        if (cfg.authMode === 'cognito' && cfg.cognitoUserPoolId && cfg.cognitoAppClientId) {
+          configureCognito(cfg.cognitoUserPoolId, cfg.cognitoAppClientId, cfg.cognitoRegion || 'us-east-1');
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        const token = localStorage.getItem('jarvis_token');
+        if (!token) {
+          setAuthState('unauthenticated');
+          return;
+        }
 
-    auth.getMe()
-      .then(() => setAuthState('authenticated'))
-      .catch(() => {
-        localStorage.removeItem('jarvis_token');
-        setAuthState('unauthenticated');
+        auth.getMe()
+          .then(() => setAuthState('authenticated'))
+          .catch(() => {
+            localStorage.removeItem('jarvis_token');
+            setAuthState('unauthenticated');
+          });
       });
   }, []);
 

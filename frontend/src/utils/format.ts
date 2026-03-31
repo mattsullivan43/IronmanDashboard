@@ -42,10 +42,12 @@ export function formatCurrency(
  * Formats a date string or Date object into a human-readable format.
  */
 export function formatDate(
-  date: string | Date,
+  date: string | Date | undefined | null,
   pattern: string = 'EEEE, MMMM d, yyyy'
 ): string {
+  if (!date) return '—';
   const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '—';
   return format(d, pattern);
 }
 
@@ -64,7 +66,9 @@ export function formatPercent(
 /**
  * Formats a time string (ISO) to HH:MM in 24-hour format.
  */
-export function formatTime(date: string | Date): string {
+export function formatTime(date: string | Date | undefined | null): string {
+  if (!date) return '—';
   const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '—';
   return format(d, 'HH:mm');
 }

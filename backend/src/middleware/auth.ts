@@ -91,8 +91,9 @@ export function authenticateToken(
 // Alias for routes that import as authMiddleware
 export const authMiddleware = authenticateToken;
 
-export function createAuthRouter(): Router {
+export function createAuthRouter(protect?: (req: any, res: any, next: any) => void): Router {
   const router = Router();
+  const authMiddleware = protect || authenticateToken;
 
   router.post('/login', async (req: Request, res: Response): Promise<void> => {
     try {
@@ -145,13 +146,13 @@ export function createAuthRouter(): Router {
     }
   });
 
-  router.get('/verify', authenticateToken, (req: AuthenticatedRequest, res: Response): void => {
+  router.get('/verify', authMiddleware, (req: AuthenticatedRequest, res: Response): void => {
     res.json({ valid: true, user: req.user });
   });
 
   router.post(
     '/change-password',
-    authenticateToken,
+    authMiddleware,
     async (req: AuthenticatedRequest, res: Response): Promise<void> => {
       try {
         const { currentPassword, newPassword } = req.body;

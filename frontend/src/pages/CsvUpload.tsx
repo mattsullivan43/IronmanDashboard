@@ -156,7 +156,7 @@ export default function CsvUploadPage() {
   // PDF / Statement state
   const [isPdf, setIsPdf] = useState(false);
   const [statementSummary, setStatementSummary] = useState<{
-    period?: string;
+    period?: string | { start: string; end: string };
     beginningBalance?: number;
     endingBalance?: number;
     totalDebits?: number;
@@ -172,7 +172,7 @@ export default function CsvUploadPage() {
   } | null>(null);
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [previewData, setPreviewData] = useState<
-    Array<{ date: string; description: string; amount: string; category: string; isDuplicate?: boolean }>
+    Array<{ date: string; description: string; amount: string; type?: string; category: string; isDuplicate?: boolean }>
   >([]);
 
   // Upload history
@@ -233,6 +233,7 @@ export default function CsvUploadPage() {
           date: t.date || '',
           description: t.description || '',
           amount: String(t.amount || ''),
+          type: t.type || (Number(t.amount) >= 0 ? 'income' : 'expense'),
           category: t.category || 'Uncategorized',
           isDuplicate: t.isDuplicate || false,
         }));
@@ -331,9 +332,12 @@ export default function CsvUploadPage() {
             date: t.date,
             description: t.description,
             amount: t.amount,
+            type: t.type,
             category: t.category,
           })),
           fileUploadId: uploadId || undefined,
+          endingBalance: statementSummary?.endingBalance,
+          statementDate: typeof statementSummary?.period === 'object' ? statementSummary.period.end : undefined,
         });
         setImportResult({
           imported: result.importedCount ?? result.imported ?? txnsToImport.length,
@@ -641,7 +645,11 @@ export default function CsvUploadPage() {
           {statementSummary.period && (
             <div className="px-4 py-3 bg-[#0D1321]/80 border border-[#1A2035] rounded-lg">
               <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Statement Period</p>
-              <p className="text-sm font-mono text-white/80">{statementSummary.period}</p>
+              <p className="text-sm font-mono text-white/80">
+                {typeof statementSummary.period === 'object'
+                  ? `${statementSummary.period.start} – ${statementSummary.period.end}`
+                  : statementSummary.period}
+              </p>
             </div>
           )}
           {statementSummary.beginningBalance != null && (

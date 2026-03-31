@@ -27,7 +27,7 @@ router.get('/overview', async (_req: Request, res: Response) => {
     const burnResult = await query(
       `SELECT COALESCE(SUM(amount), 0) as total_expenses
        FROM transactions
-       WHERE type = 'expense'
+       WHERE type = 'expense' AND COALESCE(category,'') != 'Transfer'
          AND date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
          AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH`,
       []
@@ -39,7 +39,7 @@ router.get('/overview', async (_req: Request, res: Response) => {
       `SELECT COALESCE(AVG(monthly_total), 0) as avg_burn FROM (
         SELECT DATE_FORMAT(date, '%Y-%m-01') as m, SUM(amount) as monthly_total
         FROM transactions
-        WHERE type = 'expense'
+        WHERE type = 'expense' AND COALESCE(category,'') != 'Transfer'
           AND date >= DATE_SUB(CURDATE(), INTERVAL 3 MONTH)
         GROUP BY DATE_FORMAT(date, '%Y-%m-01')
       ) sub`,
@@ -52,7 +52,7 @@ router.get('/overview', async (_req: Request, res: Response) => {
     const incomeResult = await query(
       `SELECT COALESCE(SUM(amount), 0) as total_income
        FROM transactions
-       WHERE type = 'income'
+       WHERE type = 'income' AND COALESCE(category,'') != 'Transfer'
          AND date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
          AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH`,
       []
@@ -66,18 +66,34 @@ router.get('/overview', async (_req: Request, res: Response) => {
       []
     );
 
+    // Revenue growth: compare this month's income to last month's
+    const prevIncomeResult = await query(
+      `SELECT COALESCE(SUM(amount), 0) as total_income
+       FROM transactions
+       WHERE type = 'income' AND COALESCE(category,'') != 'Transfer'
+         AND date >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01')
+         AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01')`,
+      []
+    );
+    const prevIncome = parseFloat(prevIncomeResult[0].total_income);
+    const revenueGrowth = prevIncome > 0 ? ((monthlyIncome - prevIncome) / prevIncome) * 100 : 0;
+    const profitMargin = monthlyIncome > 0 ? (netProfitLoss / monthlyIncome) * 100 : 0;
+
     return res.json({
       success: true,
       data: {
         mrr,
         arr,
-        cash_balance: cashBalance,
-        burn_rate: burnRate,
-        runway_months: runway,
-        monthly_income: monthlyIncome,
-        monthly_expenses: monthlyExpenses,
-        net_profit_loss: netProfitLoss,
-        active_clients: parseInt(clientCount[0].count, 10),
+        cashBalance,
+        burnRate,
+        runway: runway ?? 0,
+        totalRevenue: monthlyIncome,
+        totalExpenses: monthlyExpenses,
+        netProfit: netProfitLoss,
+        revenueGrowth: Math.round(revenueGrowth * 100) / 100,
+        expenseGrowth: 0,
+        profitMargin: Math.round(profitMargin * 100) / 100,
+        activeClients: parseInt(clientCount[0].count, 10),
       },
     });
   } catch (err: any) {
@@ -86,67 +102,169 @@ router.get('/overview', async (_req: Request, res: Response) => {
   }
 });
 
-// GET /api/metrics/revenue - MRR over time, by product line, net new MRR, churn rate, NRR
+// GET /api/metrics/revenue - MRR, ARR, growth, byMonth, byCategory, byClient
+// Frontend expects RevenueMetrics shape: { mrr, arr, growth, current, previous, byMonth, byCategory, byClient }
 router.get('/revenue', async (req: Request, res: Response) => {
   try {
-    const { months } = req.query;
-    const monthCount = parseInt(months as string, 10) || 12;
+    const { startDate, endDate, months } = req.query;
 
-    // Current MRR by product line
-    const byProductLine = await query(
-      `SELECT
-        product_line,
-        COUNT(*) as client_count,
-        COALESCE(SUM(monthly_revenue + monthly_recurring_fee), 0) as mrr
-       FROM clients WHERE status = 'active'
-       GROUP BY product_line`,
-      []
-    );
-
-    // MRR over time from snapshots
-    const cutoffDate = new Date();
-    cutoffDate.setMonth(cutoffDate.getMonth() - monthCount);
-    const cutoffStr = cutoffDate.toISOString().split('T')[0];
-
-    const mrrHistory = await query(
-      `SELECT month, mrr, new_mrr, expansion_mrr, churned_mrr,
-              boomline_mrr, ai_receptionist_mrr, custom_software_revenue,
-              total_customers, churned_customers
-       FROM revenue_snapshots
-       WHERE month >= ?
-       ORDER BY month ASC`,
-      [cutoffStr]
-    );
-
-    // Churn rate: churned clients in last 30 days / total active at start
-    const churnResult = await query(
-      `SELECT
-        (SELECT COUNT(*) FROM clients WHERE status = 'churned' AND updated_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) as recently_churned,
-        (SELECT COUNT(*) FROM clients WHERE status IN ('active', 'churned')) as total_base`,
-      []
-    );
-    const recentlyChurned = parseInt(churnResult[0].recently_churned, 10);
-    const totalBase = parseInt(churnResult[0].total_base, 10);
-    const churnRate = totalBase > 0 ? (recentlyChurned / totalBase) * 100 : 0;
-
-    // Net Revenue Retention from latest snapshot
-    let nrr = 100;
-    if (mrrHistory.length >= 2) {
-      const latest = mrrHistory[mrrHistory.length - 1];
-      const previous = mrrHistory[mrrHistory.length - 2];
-      const prevMrr = parseFloat(previous.mrr);
-      if (prevMrr > 0) {
-        nrr = ((prevMrr + parseFloat(latest.expansion_mrr || '0') - parseFloat(latest.churned_mrr || '0')) / prevMrr) * 100;
-      }
+    // Determine date range
+    let start: string;
+    let end: string;
+    if (startDate && endDate) {
+      start = startDate as string;
+      end = endDate as string;
+    } else {
+      const monthCount = parseInt(months as string, 10) || 6;
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - monthCount);
+      start = cutoff.toISOString().split('T')[0];
+      end = new Date().toISOString().split('T')[0];
     }
+
+    // ── MRR from active clients (contract-based baseline) ──────────────
+    const mrrResult = await query(
+      `SELECT COALESCE(SUM(monthly_revenue + monthly_recurring_fee), 0) as mrr
+       FROM clients WHERE status = 'active'`,
+      []
+    );
+    const clientMrr = parseFloat(mrrResult[0].mrr);
+
+    // ── Monthly revenue/expenses/profit from transactions ──────────────
+    const monthlyData = await query(
+      `SELECT
+        DATE_FORMAT(date, '%Y-%m') as month,
+        COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as revenue,
+        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as expenses
+       FROM transactions
+       WHERE date >= ? AND date <= ?
+       GROUP BY DATE_FORMAT(date, '%Y-%m')
+       ORDER BY month ASC`,
+      [start, end]
+    );
+
+    const byMonth = monthlyData.map((row: any) => {
+      const revenue = parseFloat(row.revenue);
+      const expenses = parseFloat(row.expenses);
+      return {
+        month: row.month,
+        revenue,
+        expenses,
+        profit: revenue - expenses,
+      };
+    });
+
+    // ── MRR & growth from actual transaction data ──────────────────────
+    // Use the most recent full month's income as transaction-based MRR
+    // Fall back to client-based MRR if no transaction data
+    let transactionMrr = clientMrr;
+    let prevMonthRevenue = 0;
+    if (byMonth.length >= 1) {
+      transactionMrr = byMonth[byMonth.length - 1].revenue;
+    }
+    if (byMonth.length >= 2) {
+      prevMonthRevenue = byMonth[byMonth.length - 2].revenue;
+    }
+
+    // Use the higher of client-based MRR and transaction-based MRR
+    // (transactions reflect actual payments; client table reflects contracts)
+    const mrr = Math.max(clientMrr, transactionMrr);
+    const arr = mrr * 12;
+
+    // MRR growth rate: month-over-month change from transactions
+    const growth = prevMonthRevenue > 0
+      ? (transactionMrr - prevMonthRevenue) / prevMonthRevenue
+      : 0;
+
+    // Current & previous period totals
+    const current = byMonth.reduce((sum: number, m: any) => sum + m.revenue, 0);
+    // For previous, query the same-length period before start
+    const startD = new Date(start);
+    const endD = new Date(end);
+    const rangeDays = Math.round((endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24));
+    const prevEnd = new Date(startD);
+    prevEnd.setDate(prevEnd.getDate() - 1);
+    const prevStart = new Date(prevEnd);
+    prevStart.setDate(prevStart.getDate() - rangeDays);
+    const prevPeriodStr = prevStart.toISOString().split('T')[0];
+    const prevEndStr = prevEnd.toISOString().split('T')[0];
+
+    const prevResult = await query(
+      `SELECT COALESCE(SUM(amount), 0) as total
+       FROM transactions
+       WHERE type = 'income' AND COALESCE(category,'') != 'Transfer' AND date >= ? AND date <= ?`,
+      [prevPeriodStr, prevEndStr]
+    );
+    const previous = parseFloat(prevResult[0].total);
+
+    // ── Revenue by category/product line from transactions ─────────────
+    // Join with clients to get product_line, fall back to transaction category
+    const categoryData = await query(
+      `SELECT
+        COALESCE(
+          CASE c.product_line
+            WHEN 'boomline' THEN 'BoomLine'
+            WHEN 'ai_receptionist' THEN 'AI Receptionist'
+            WHEN 'custom_software' THEN 'Custom Software'
+            ELSE NULL
+          END,
+          t.category,
+          'Uncategorized'
+        ) as category,
+        COALESCE(SUM(t.amount), 0) as amount
+       FROM transactions t
+       LEFT JOIN clients c ON t.client_id = c.id
+       WHERE t.type = 'income' AND t.date >= ? AND t.date <= ?
+       GROUP BY category
+       ORDER BY amount DESC`,
+      [start, end]
+    );
+
+    const totalCategoryRevenue = categoryData.reduce(
+      (sum: number, row: any) => sum + parseFloat(row.amount), 0
+    );
+
+    const byCategory = categoryData.map((row: any) => {
+      const amount = parseFloat(row.amount);
+      return {
+        category: row.category,
+        amount,
+        percentage: totalCategoryRevenue > 0 ? amount / totalCategoryRevenue : 0,
+      };
+    });
+
+    // ── Revenue by client from transactions ────────────────────────────
+    const clientData = await query(
+      `SELECT
+        COALESCE(t.client_id, 'unknown') as clientId,
+        COALESCE(c.company_name, t.description, 'Unknown') as clientName,
+        COALESCE(SUM(t.amount), 0) as revenue
+       FROM transactions t
+       LEFT JOIN clients c ON t.client_id = c.id
+       WHERE t.type = 'income' AND t.date >= ? AND t.date <= ?
+       GROUP BY clientId, clientName
+       ORDER BY revenue DESC
+       LIMIT 20`,
+      [start, end]
+    );
+
+    const byClient = clientData.map((row: any) => ({
+      clientId: row.clientId,
+      clientName: row.clientName,
+      revenue: parseFloat(row.revenue),
+    }));
 
     return res.json({
       success: true,
       data: {
-        by_product_line: byProductLine,
-        mrr_history: mrrHistory,
-        churn_rate: Math.round(churnRate * 100) / 100,
-        net_revenue_retention: Math.round(nrr * 100) / 100,
+        mrr,
+        arr,
+        growth: Math.round(growth * 10000) / 10000,
+        current,
+        previous,
+        byMonth,
+        byCategory,
+        byClient,
       },
     });
   } catch (err: any) {
@@ -162,7 +280,7 @@ router.get('/unit-economics', async (_req: Request, res: Response) => {
     const salesSpend = await query(
       `SELECT COALESCE(SUM(amount), 0) as total
        FROM transactions
-       WHERE type = 'expense'
+       WHERE type = 'expense' AND COALESCE(category,'') != 'Transfer'
          AND category = 'Sales & Marketing'
          AND date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)`,
       []
@@ -235,78 +353,98 @@ router.get('/unit-economics', async (_req: Request, res: Response) => {
   }
 });
 
-// GET /api/metrics/profitability - gross margin, net margin, COGS breakdown
+// GET /api/metrics/profitability - gross margin, net margin, COGS breakdown, monthly P&L
 router.get('/profitability', async (req: Request, res: Response) => {
   try {
-    const { months } = req.query;
-    const monthCount = parseInt(months as string, 10) || 3;
+    // Support both ?months=6 and ?period=6m formats (frontend sends period=6m)
+    const { months, period } = req.query;
+    let monthCount = parseInt(months as string, 10) || 0;
+    if (!monthCount && typeof period === 'string') {
+      const match = period.match(/^(\d+)m$/i);
+      if (match) monthCount = parseInt(match[1], 10);
+    }
+    if (!monthCount) monthCount = 6;
 
     const cutoffDate = new Date();
     cutoffDate.setMonth(cutoffDate.getMonth() - monthCount);
     const cutoffStr = cutoffDate.toISOString().split('T')[0];
 
-    // Revenue this period
-    const revenueResult = await query(
-      `SELECT COALESCE(SUM(amount), 0) as total_revenue
+    // Monthly breakdown: revenue, COGS, other expenses per month
+    const monthlyData = await query(
+      `SELECT
+        DATE_FORMAT(date, '%Y-%m') as month,
+        COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as revenue,
+        COALESCE(SUM(CASE WHEN type = 'expense' AND category = 'COGS' THEN amount ELSE 0 END), 0) as cogs,
+        COALESCE(SUM(CASE WHEN type = 'expense' AND category != 'COGS' THEN amount ELSE 0 END), 0) as opex,
+        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses
        FROM transactions
-       WHERE type = 'income'
-         AND date >= ?`,
+       WHERE date >= ?
+       GROUP BY DATE_FORMAT(date, '%Y-%m')
+       ORDER BY month ASC`,
       [cutoffStr]
     );
-    const totalRevenue = parseFloat(revenueResult[0].total_revenue);
 
-    // COGS from transactions
-    const cogsResult = await query(
-      `SELECT COALESCE(SUM(amount), 0) as total_cogs
-       FROM transactions
-       WHERE type = 'expense'
-         AND category = 'COGS'
-         AND date >= ?`,
-      [cutoffStr]
-    );
-    const totalCogs = parseFloat(cogsResult[0].total_cogs);
+    const byMonth = monthlyData.map((row: any) => {
+      const revenue = parseFloat(row.revenue);
+      const cogs = parseFloat(row.cogs);
+      const opex = parseFloat(row.opex);
+      const grossProfit = revenue - cogs;
+      const netProfit = grossProfit - opex;
+      return {
+        month: row.month,
+        revenue,
+        cogs,
+        grossProfit,
+        opex,
+        netProfit,
+      };
+    });
 
-    // All expenses by category
-    const expenseBreakdown = await query(
+    // Aggregate totals across the period
+    const totalRevenue = byMonth.reduce((sum: number, m: any) => sum + m.revenue, 0);
+    const totalCogs = byMonth.reduce((sum: number, m: any) => sum + m.cogs, 0);
+    const totalOpex = byMonth.reduce((sum: number, m: any) => sum + m.opex, 0);
+    const totalExpenses = totalCogs + totalOpex;
+    const grossProfit = totalRevenue - totalCogs;
+    const grossMargin = totalRevenue > 0 ? grossProfit / totalRevenue : 0;
+    const netProfit = grossProfit - totalOpex;
+    const netMargin = totalRevenue > 0 ? netProfit / totalRevenue : 0;
+    const operatingMargin = totalRevenue > 0 ? (totalRevenue - totalExpenses) / totalRevenue : 0;
+    // EBITDA approximated as net profit (no depreciation/amortization/interest/tax data)
+    const ebitda = netProfit;
+
+    // Expense breakdown by category
+    const expenseRows = await query(
       `SELECT category, COALESCE(SUM(amount), 0) as total
        FROM transactions
-       WHERE type = 'expense'
+       WHERE type = 'expense' AND COALESCE(category,'') != 'Transfer'
          AND date >= ?
        GROUP BY category
        ORDER BY total DESC`,
       [cutoffStr]
     );
 
-    const totalExpenses = expenseBreakdown.reduce(
-      (sum: number, row: any) => sum + parseFloat(row.total), 0
-    );
-
-    const grossProfit = totalRevenue - totalCogs;
-    const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
-    const netProfit = totalRevenue - totalExpenses;
-    const netMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
-
-    // COGS breakdown from client-level cogs
-    const cogsBreakdown = await query(
-      `SELECT product_line, COALESCE(SUM(cogs_monthly), 0) as monthly_cogs
-       FROM clients WHERE status = 'active' AND cogs_monthly > 0
-       GROUP BY product_line`,
-      []
-    );
+    const expenseBreakdown = expenseRows.map((row: any) => {
+      const amount = parseFloat(row.total);
+      return {
+        category: row.category,
+        amount,
+        percentage: totalExpenses > 0 ? amount / totalExpenses : 0,
+      };
+    });
 
     return res.json({
       success: true,
       data: {
-        period_months: monthCount,
-        total_revenue: totalRevenue,
-        total_cogs: totalCogs,
-        gross_profit: grossProfit,
-        gross_margin: Math.round(grossMargin * 100) / 100,
-        total_expenses: totalExpenses,
-        net_profit: netProfit,
-        net_margin: Math.round(netMargin * 100) / 100,
-        expense_breakdown: expenseBreakdown,
-        cogs_breakdown: cogsBreakdown,
+        grossProfit,
+        grossMargin,
+        netProfit,
+        netMargin,
+        operatingExpenses: totalOpex,
+        operatingMargin,
+        ebitda,
+        byMonth,
+        expenseBreakdown,
       },
     });
   } catch (err: any) {
@@ -348,39 +486,67 @@ router.get('/cash-burn', async (_req: Request, res: Response) => {
     );
     const cashBalance = cashResult.length > 0 ? parseFloat(cashResult[0].balance) : 0;
 
-    const grossRunway = avgGrossBurn > 0 ? Math.round(cashBalance / avgGrossBurn) : null;
-    const netRunway = avgNetBurn > 0 ? Math.round(cashBalance / avgNetBurn) : null;
+    const netRunway = avgNetBurn > 0 ? cashBalance / avgNetBurn : 0;
 
-    // Burn multiple = net burn / net new ARR (from latest snapshot)
-    const latestSnapshot = await query(
-      'SELECT new_mrr FROM revenue_snapshots ORDER BY month DESC LIMIT 1',
-      []
+    // Monthly burn: use current month's net burn if available, else 3-month avg
+    const now = new Date();
+    const currentMonthStr = now.toISOString().slice(0, 7);
+    const currentMonthEntry = burnHistory.find(
+      (r: any) => r.month.startsWith(currentMonthStr)
     );
-    const netNewArr = latestSnapshot.length > 0
-      ? parseFloat(latestSnapshot[0].new_mrr) * 12
-      : 0;
-    const burnMultiple = netNewArr > 0 ? (avgNetBurn * 12) / netNewArr : null;
+    const monthlyBurn = currentMonthEntry
+      ? parseFloat(currentMonthEntry.expenses) - parseFloat(currentMonthEntry.income)
+      : avgNetBurn;
 
-    // Break-even: month where income >= expenses
-    const mrrResult = await query(
-      "SELECT COALESCE(SUM(monthly_revenue + monthly_recurring_fee), 0) as mrr FROM clients WHERE status = 'active'",
-      []
-    );
-    const currentMrr = parseFloat(mrrResult[0].mrr);
-    const breakEvenGap = avgGrossBurn - currentMrr;
+    // Burn trend: compare last two months of burn history
+    let burnTrend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+    if (burnHistory.length >= 2) {
+      const recent = burnHistory.slice(-3);
+      if (recent.length >= 2) {
+        const lastBurn = parseFloat(recent[recent.length - 1].expenses) - parseFloat(recent[recent.length - 1].income);
+        const prevBurn = parseFloat(recent[recent.length - 2].expenses) - parseFloat(recent[recent.length - 2].income);
+        const change = lastBurn - prevBurn;
+        const threshold = prevBurn * 0.1; // 10% threshold
+        if (change > threshold) burnTrend = 'increasing';
+        else if (change < -threshold) burnTrend = 'decreasing';
+      }
+    }
+
+    // Map burn_history to byMonth with running balance
+    let runningBalance = cashBalance;
+    // Build byMonth in reverse to calculate historical balances
+    const byMonthReversed = [...burnHistory].reverse().map((r: any) => {
+      const inflow = parseFloat(r.income);
+      const outflow = parseFloat(r.expenses);
+      const netCash = inflow - outflow;
+      const balance = runningBalance;
+      runningBalance = runningBalance - netCash; // previous month's balance
+      return { month: r.month.slice(0, 7), inflow, outflow, netCash, balance };
+    });
+    const byMonth = byMonthReversed.reverse();
+
+    // Projected runway: 12 months forward based on avg net burn
+    const projectedRunway: Array<{ month: string; balance: number }> = [];
+    let projBalance = cashBalance;
+    for (let i = 1; i <= 12; i++) {
+      const projDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const projMonth = projDate.toISOString().slice(0, 7);
+      projBalance = Math.max(0, projBalance - avgNetBurn);
+      projectedRunway.push({
+        month: projMonth,
+        balance: Math.round(projBalance * 100) / 100,
+      });
+    }
 
     return res.json({
       success: true,
       data: {
-        cash_balance: cashBalance,
-        avg_gross_burn: Math.round(avgGrossBurn * 100) / 100,
-        avg_net_burn: Math.round(avgNetBurn * 100) / 100,
-        gross_runway_months: grossRunway,
-        net_runway_months: netRunway,
-        burn_multiple: burnMultiple ? Math.round(burnMultiple * 100) / 100 : null,
-        current_mrr: currentMrr,
-        break_even_gap: Math.round(breakEvenGap * 100) / 100,
-        burn_history: burnHistory,
+        cashBalance,
+        monthlyBurn: Math.round(monthlyBurn * 100) / 100,
+        runway: Math.round(netRunway * 10) / 10,
+        burnTrend,
+        byMonth,
+        projectedRunway,
       },
     });
   } catch (err: any) {
@@ -405,15 +571,61 @@ router.get('/boomline', async (_req: Request, res: Response) => {
 
     const clients = result;
     const activeClients = clients.filter((c: any) => c.status === 'active');
+    const activeClientIds = activeClients.map((c: any) => c.id);
 
     const totalCranes = activeClients.reduce((sum: number, c: any) => sum + (c.crane_count || 0), 0);
-    const totalRevenue = activeClients.reduce((sum: number, c: any) => sum + parseFloat(c.monthly_revenue || '0'), 0);
+    const contractRevenue = activeClients.reduce((sum: number, c: any) => sum + parseFloat(c.monthly_revenue || '0'), 0);
     const totalCogs = activeClients.reduce((sum: number, c: any) => sum + parseFloat(c.cogs_monthly || '0'), 0);
+
+    // Supplement with actual transaction income for boomline clients (current month)
+    let actualRevenue = contractRevenue;
+    if (activeClientIds.length > 0) {
+      const placeholders = activeClientIds.map(() => '?').join(',');
+      const txResult = await query(
+        `SELECT COALESCE(SUM(amount), 0) as total
+         FROM transactions
+         WHERE type = 'income' AND COALESCE(category,'') != 'Transfer'
+           AND client_id IN (${placeholders})
+           AND date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+           AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH`,
+        activeClientIds
+      );
+      const txTotal = parseFloat(txResult[0].total);
+      // Use transaction total if it exists (actual payments), otherwise fall back to contract
+      if (txTotal > 0) {
+        actualRevenue = txTotal;
+      }
+    }
+
+    const totalRevenue = actualRevenue;
     const totalMargin = totalRevenue - totalCogs;
 
     const revPerCrane = totalCranes > 0 ? totalRevenue / totalCranes : 0;
     const costPerCrane = totalCranes > 0 ? totalCogs / totalCranes : 0;
     const marginPerCrane = totalCranes > 0 ? totalMargin / totalCranes : 0;
+
+    // Per-client: compare contract vs actual transaction revenue
+    const clientsWithActuals = await Promise.all(
+      clients.map(async (c: any) => {
+        const txResult = await query(
+          `SELECT COALESCE(SUM(amount), 0) as total
+           FROM transactions
+           WHERE type = 'income' AND COALESCE(category,'') != 'Transfer'
+             AND client_id = ?
+             AND date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+             AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH`,
+          [c.id]
+        );
+        const actualMonthlyRevenue = parseFloat(txResult[0].total);
+        return {
+          ...c,
+          actual_monthly_revenue: actualMonthlyRevenue,
+          revenue_validated: actualMonthlyRevenue > 0
+            ? Math.abs(actualMonthlyRevenue - parseFloat(c.monthly_revenue || '0')) < 0.01
+            : null,
+        };
+      })
+    );
 
     // Crane count over time from snapshots
     const craneHistory = await query(
@@ -424,10 +636,11 @@ router.get('/boomline', async (_req: Request, res: Response) => {
     return res.json({
       success: true,
       data: {
-        clients,
+        clients: clientsWithActuals,
         totals: {
           total_cranes: totalCranes,
           total_monthly_revenue: totalRevenue,
+          total_monthly_revenue_contract: contractRevenue,
           total_monthly_cogs: totalCogs,
           total_margin: totalMargin,
           rev_per_crane: Math.round(revPerCrane * 100) / 100,
@@ -458,27 +671,70 @@ router.get('/ai-receptionist', async (_req: Request, res: Response) => {
 
     const clients = result;
     const activeClients = clients.filter((c: any) => c.status === 'active');
+    const activeClientIds = activeClients.map((c: any) => c.id);
 
-    const totalMrr = activeClients.reduce((sum: number, c: any) => sum + parseFloat(c.monthly_recurring_fee || '0'), 0);
+    const contractMrr = activeClients.reduce((sum: number, c: any) => sum + parseFloat(c.monthly_recurring_fee || '0'), 0);
     const totalCogs = activeClients.reduce((sum: number, c: any) => sum + parseFloat(c.cogs_monthly || '0'), 0);
+
+    // Supplement with actual transaction income for AI receptionist clients (current month)
+    let actualMrr = contractMrr;
+    if (activeClientIds.length > 0) {
+      const placeholders = activeClientIds.map(() => '?').join(',');
+      const txResult = await query(
+        `SELECT COALESCE(SUM(amount), 0) as total
+         FROM transactions
+         WHERE type = 'income' AND COALESCE(category,'') != 'Transfer'
+           AND client_id IN (${placeholders})
+           AND date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+           AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH`,
+        activeClientIds
+      );
+      const txTotal = parseFloat(txResult[0].total);
+      if (txTotal > 0) {
+        actualMrr = txTotal;
+      }
+    }
+
+    const totalMrr = actualMrr;
     const totalMargin = totalMrr - totalCogs;
     const avgMargin = activeClients.length > 0 ? totalMargin / activeClients.length : 0;
     const marginPercent = totalMrr > 0 ? (totalMargin / totalMrr) * 100 : 0;
 
-    // Per-client metrics
-    const perClient = activeClients.map((c: any) => {
-      const rev = parseFloat(c.monthly_recurring_fee || '0');
-      const cogs = parseFloat(c.cogs_monthly || '0');
-      const margin = rev - cogs;
-      return {
-        id: c.id,
-        company_name: c.company_name,
-        monthly_revenue: rev,
-        monthly_cogs: cogs,
-        margin,
-        margin_percent: rev > 0 ? Math.round((margin / rev) * 10000) / 100 : 0,
-      };
-    });
+    // Per-client metrics with transaction validation
+    const perClient = await Promise.all(
+      activeClients.map(async (c: any) => {
+        const contractRev = parseFloat(c.monthly_recurring_fee || '0');
+        const cogs = parseFloat(c.cogs_monthly || '0');
+
+        // Check actual transaction revenue for this client
+        const txResult = await query(
+          `SELECT COALESCE(SUM(amount), 0) as total
+           FROM transactions
+           WHERE type = 'income' AND COALESCE(category,'') != 'Transfer'
+             AND client_id = ?
+             AND date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+             AND date < DATE_FORMAT(CURDATE(), '%Y-%m-01') + INTERVAL 1 MONTH`,
+          [c.id]
+        );
+        const actualRev = parseFloat(txResult[0].total);
+        const rev = actualRev > 0 ? actualRev : contractRev;
+        const margin = rev - cogs;
+
+        return {
+          id: c.id,
+          company_name: c.company_name,
+          monthly_revenue: rev,
+          monthly_revenue_contract: contractRev,
+          actual_monthly_revenue: actualRev,
+          revenue_validated: actualRev > 0
+            ? Math.abs(actualRev - contractRev) < 0.01
+            : null,
+          monthly_cogs: cogs,
+          margin,
+          margin_percent: rev > 0 ? Math.round((margin / rev) * 10000) / 100 : 0,
+        };
+      })
+    );
 
     return res.json({
       success: true,
@@ -488,6 +744,7 @@ router.get('/ai-receptionist', async (_req: Request, res: Response) => {
         totals: {
           active_clients: activeClients.length,
           total_mrr: totalMrr,
+          total_mrr_contract: contractMrr,
           total_cogs: totalCogs,
           total_margin: totalMargin,
           avg_margin_per_client: Math.round(avgMargin * 100) / 100,
@@ -515,7 +772,7 @@ router.post('/cash-balance', async (req: Request, res: Response) => {
 
     await query(
       `INSERT INTO cash_balances (id, balance, source, date, notes)
-       VALUES (?, 'manual', ?, ?)`,
+       VALUES (?, ?, 'manual', ?, ?)`,
       [id, parseFloat(balance), dateVal, notes || null]
     );
 

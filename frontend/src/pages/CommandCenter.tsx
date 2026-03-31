@@ -1,24 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
   Calendar,
   Volume2,
   Users,
-  Truck,
-  DollarSign,
-  Cpu,
-  TrendingUp,
-  TrendingDown,
   ArrowRight,
   AlertCircle,
+  CheckSquare,
+  Square,
+  X,
+  Plus,
 } from 'lucide-react';
 import { MetricCard } from '../components/ui/MetricCard';
 import HudPanel from '../components/ui/HudPanel';
 import AnimatedNumber from '../components/ui/AnimatedNumber';
-import { SparkLine } from '../components/charts/SparkLine';
-import GlowBadge from '../components/ui/GlowBadge';
-import { metrics, calendar, jarvis, clients, commissions } from '../services/api';
+import { metrics, calendar, jarvis, clients, commissions, actionItems } from '../services/api';
 import { getGreeting, formatDate } from '../utils/format';
 import { formatTime } from '../utils/format';
 import type {
@@ -65,31 +62,7 @@ const itemVariants = {
 
 // ── Health helpers ──────────────────────────────────────────────────────────
 
-function mrrHealth(growth: number): 'good' | 'warning' | 'danger' {
-  if (growth >= 5) return 'good';
-  if (growth >= 0) return 'warning';
-  return 'danger';
-}
 
-function burnHealth(burn: number, revenue: number): 'good' | 'warning' | 'danger' {
-  if (revenue <= 0) return 'danger';
-  const ratio = burn / revenue;
-  if (ratio < 0.6) return 'good';
-  if (ratio < 0.9) return 'warning';
-  return 'danger';
-}
-
-function runwayHealth(months: number): 'good' | 'warning' | 'danger' {
-  if (months >= 12) return 'good';
-  if (months >= 6) return 'warning';
-  return 'danger';
-}
-
-function runwayColor(months: number): string {
-  if (months >= 12) return 'text-[#00FF88]';
-  if (months >= 6) return 'text-[#FFB800]';
-  return 'text-[#FF3B3B]';
-}
 
 // ── Loading Screen ──────────────────────────────────────────────────────────
 
@@ -155,45 +128,6 @@ function TypingText({ text, className = '' }: { text: string; className?: string
 
 // ── Mini bar chart for income vs expenses ───────────────────────────────────
 
-function MiniBarChart({
-  income,
-  expenses,
-}: {
-  income: number;
-  expenses: number;
-}) {
-  const max = Math.max(income, expenses, 1);
-  const incomePercent = (income / max) * 100;
-  const expensePercent = (expenses / max) * 100;
-
-  return (
-    <div className="flex items-end gap-3 h-10 mt-2">
-      <div className="flex flex-col items-center gap-1 flex-1">
-        <motion.div
-          className="w-full bg-[#00FF88]/20 rounded-sm relative overflow-hidden"
-          initial={{ height: 0 }}
-          animate={{ height: `${incomePercent}%` }}
-          transition={{ duration: 0.8, delay: 0.5 }}
-        >
-          <div className="absolute inset-0 bg-[#00FF88]/40" />
-        </motion.div>
-        <span className="text-[10px] text-white/40 uppercase">In</span>
-      </div>
-      <div className="flex flex-col items-center gap-1 flex-1">
-        <motion.div
-          className="w-full bg-[#FF3B3B]/20 rounded-sm relative overflow-hidden"
-          initial={{ height: 0 }}
-          animate={{ height: `${expensePercent}%` }}
-          transition={{ duration: 0.8, delay: 0.6 }}
-        >
-          <div className="absolute inset-0 bg-[#FF3B3B]/40" />
-        </motion.div>
-        <span className="text-[10px] text-white/40 uppercase">Out</span>
-      </div>
-    </div>
-  );
-}
-
 // ── Calendar source dot ─────────────────────────────────────────────────────
 
 function SourceDot({ source }: { source: string }) {
@@ -203,6 +137,183 @@ function SourceDot({ source }: { source: string }) {
     manual: 'bg-[#00D4FF]',
   };
   return <span className={`inline-block w-2 h-2 rounded-full ${colors[source] || colors.manual}`} />;
+}
+
+// ── Action Items Widget ────────────────────────────────────────────────────
+
+interface ActionItem {
+  id: string;
+  title: string;
+  completed: number;
+  due_date: string;
+  priority: string;
+  created_at: string;
+}
+
+function ActionItemsWidget() {
+  const [items, setItems] = useState<ActionItem[]>([]);
+  const [newTitle, setNewTitle] = useState('');
+  const [newPriority, setNewPriority] = useState<'normal' | 'high'>('normal');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const fetchItems = useCallback(async () => {
+    try {
+      const data = await actionItems.list();
+      setItems(Array.isArray(data) ? data : []);
+    } catch {
+      // silent
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
+
+  const addItem = async () => {
+    const title = newTitle.trim();
+    if (!title) return;
+    try {
+      await actionItems.create({ title, priority: newPriority });
+      setNewTitle('');
+      setNewPriority('normal');
+      fetchItems();
+    } catch {
+      // silent
+    }
+  };
+
+  const toggleItem = async (item: ActionItem) => {
+    try {
+      await actionItems.update(item.id, { completed: !item.completed });
+      fetchItems();
+    } catch {
+      // silent
+    }
+  };
+
+  const deleteItem = async (id: string) => {
+    try {
+      await actionItems.delete(id);
+      fetchItems();
+    } catch {
+      // silent
+    }
+  };
+
+  const completedCount = items.filter((i) => i.completed).length;
+
+  return (
+    <HudPanel title="Action Items" delay={0.65}>
+      {/* Progress indicator */}
+      {items.length > 0 && (
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex-1 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-[#00D4FF] rounded-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${(completedCount / items.length) * 100}%` }}
+              transition={{ duration: 0.5 }}
+            />
+          </div>
+          <span className="text-[10px] text-white/40 font-['JetBrains_Mono',monospace] shrink-0">
+            {completedCount}/{items.length}
+          </span>
+        </div>
+      )}
+
+      {/* Item list */}
+      <div className="space-y-1 max-h-[260px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10">
+        <AnimatePresence>
+          {items.map((item) => (
+            <motion.div
+              key={item.id}
+              layout
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 12 }}
+              className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-white/[0.03] transition-colors group"
+            >
+              {/* Priority indicator */}
+              {item.priority === 'high' && (
+                <span className="w-1.5 h-1.5 rounded-full bg-[#FF3B3B] shadow-[0_0_6px_rgba(255,59,59,0.6)] shrink-0" />
+              )}
+
+              {/* Checkbox */}
+              <button
+                onClick={() => toggleItem(item)}
+                className="shrink-0 text-[#00D4FF]/60 hover:text-[#00D4FF] transition-colors"
+              >
+                {item.completed ? (
+                  <CheckSquare className="w-4 h-4 text-[#00FF88]" />
+                ) : (
+                  <Square className="w-4 h-4" />
+                )}
+              </button>
+
+              {/* Title */}
+              <span
+                className={`text-sm flex-1 truncate transition-all ${
+                  item.completed
+                    ? 'line-through text-white/30'
+                    : 'text-white/80'
+                }`}
+              >
+                {item.title}
+              </span>
+
+              {/* Delete */}
+              <button
+                onClick={() => deleteItem(item.id)}
+                className="opacity-0 group-hover:opacity-100 shrink-0 text-white/20 hover:text-[#FF3B3B] transition-all"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+
+        {items.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <CheckSquare className="w-8 h-8 text-[#00D4FF]/20 mb-2" />
+            <p className="text-white/30 text-sm">No action items for today, sir.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Add new item */}
+      <div className="mt-4 flex items-center gap-2">
+        {/* Priority toggle */}
+        <button
+          onClick={() => setNewPriority(newPriority === 'normal' ? 'high' : 'normal')}
+          className={`shrink-0 w-6 h-6 rounded flex items-center justify-center transition-colors ${
+            newPriority === 'high'
+              ? 'bg-[#FF3B3B]/20 text-[#FF3B3B]'
+              : 'bg-white/[0.04] text-white/30 hover:text-white/50'
+          }`}
+          title={newPriority === 'high' ? 'High priority' : 'Normal priority'}
+        >
+          <AlertCircle className="w-3 h-3" />
+        </button>
+
+        <input
+          ref={inputRef}
+          type="text"
+          value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addItem()}
+          placeholder="Add action item..."
+          className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-md px-3 py-1.5 text-sm text-white/80 placeholder-white/20 outline-none focus:border-[#00D4FF]/40 transition-colors font-['JetBrains_Mono',monospace]"
+        />
+
+        <button
+          onClick={addItem}
+          className="shrink-0 w-7 h-7 rounded-md bg-[#00D4FF]/10 text-[#00D4FF] hover:bg-[#00D4FF]/20 transition-colors flex items-center justify-center"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+    </HudPanel>
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -302,48 +413,18 @@ export default function CommandCenter() {
 
   const overview = data.overview;
   const cashBurn = data.cashBurn;
-  const mrr = overview?.mrr ?? 0;
-  const arr = mrr * 12;
   const cashBalance = cashBurn?.cashBalance ?? overview?.cashBalance ?? 0;
-  const monthlyBurn = cashBurn?.monthlyBurn ?? 0;
-  const runway = cashBurn?.runway ?? overview?.runway ?? 0;
-  const revenueGrowth = overview?.revenueGrowth ?? 0;
   const totalRevenue = overview?.totalRevenue ?? 0;
   const totalExpenses = overview?.totalExpenses ?? 0;
   const netProfit = overview?.netProfit ?? 0;
   const isProfit = netProfit >= 0;
-
-  // Sparkline data from cashBurn history
-  const burnHistory = (cashBurn as any)?.burn_history ?? [];
-  const mrrSparkData = burnHistory.length > 0 ? burnHistory.map((m: any) => parseFloat(m.income ?? m.inflow ?? 0)) : [0, 0];
-  const cashSparkData = burnHistory.length > 0 ? burnHistory.map((m: any) => parseFloat(m.income ?? 0) - parseFloat(m.expenses ?? 0)) : [0, 0];
-  const burnSparkData = burnHistory.length > 0 ? burnHistory.map((m: any) => parseFloat(m.expenses ?? m.outflow ?? 0)) : [0, 0];
 
   // Upcoming events (next 5, sorted by start time)
   const upcomingEvents = [...data.events]
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
     .slice(0, 5);
 
-  // AI usage today — backend returns { requests, tokens, limit } directly, no byDay array
-  const aiUsageAny = data.aiUsage as any;
-  let aiRequestsToday = 0;
-  let aiDailyLimit = 50;
-  if (aiUsageAny) {
-    if (typeof aiUsageAny.requests === 'number') {
-      aiRequestsToday = aiUsageAny.requests;
-      aiDailyLimit = aiUsageAny.limit ?? 50;
-    } else if (Array.isArray(aiUsageAny.byDay)) {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const aiToday = aiUsageAny.byDay.find((d: any) => d.date === todayStr);
-      aiRequestsToday = aiToday?.requests ?? 0;
-      aiDailyLimit = 500;
-    }
-  }
-
-  // Total cranes = active clients (crane companies on platform)
-  const totalCranes = data.clientStats?.total ?? 0;
   const activeClients = data.clientStats?.active ?? 0;
-  const commissionsOutstanding = data.commissionStats?.totalPending ?? 0;
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -380,130 +461,43 @@ export default function CommandCenter() {
               </motion.p>
             </motion.div>
 
-            {/* ── Key Metrics Row ────────────────────────────────────── */}
+            {/* ── Key Metrics ───────────────────────────────────────── */}
             <motion.div
-              className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4"
+              className="grid grid-cols-2 lg:grid-cols-4 gap-4"
               variants={containerVariants}
             >
-              {/* MRR */}
               <motion.div variants={itemVariants}>
-                <MetricCard
-                  label="Monthly Recurring Revenue"
-                  health={mrrHealth(revenueGrowth)}
-                  footer={
-                    <div className="flex items-center justify-between">
-                      <SparkLine data={mrrSparkData} color="#00FF88" />
-                      <GlowBadge
-                        status={mrrHealth(revenueGrowth)}
-                        label={revenueGrowth >= 0 ? 'Growing' : 'Declining'}
-                        value={`${revenueGrowth >= 0 ? '+' : ''}${revenueGrowth.toFixed(1)}%`}
-                      />
-                    </div>
-                  }
-                >
-                  <AnimatedNumber
-                    value={mrr}
-                    prefix="$"
-                    className="text-2xl font-bold text-white"
-                  />
+                <MetricCard label="Cash Balance">
+                  <AnimatedNumber value={cashBalance} prefix="$" className="text-2xl font-bold text-white" />
                 </MetricCard>
               </motion.div>
-
-              {/* ARR */}
               <motion.div variants={itemVariants}>
-                <MetricCard
-                  label="Annual Recurring Revenue"
-                  health={mrrHealth(revenueGrowth)}
-                >
-                  <AnimatedNumber
-                    value={arr}
-                    prefix="$"
-                    className="text-2xl font-bold text-white"
-                  />
-                  <p className="text-xs text-white/30 mt-1 font-['JetBrains_Mono',monospace]">
-                    MRR x 12
-                  </p>
+                <MetricCard label="Monthly Expenses">
+                  <AnimatedNumber value={totalExpenses} prefix="$" className="text-2xl font-bold text-[#FF3B3B]" />
                 </MetricCard>
               </motion.div>
-
-              {/* Cash Balance */}
               <motion.div variants={itemVariants}>
-                <MetricCard
-                  label="Cash Balance"
-                  footer={<SparkLine data={cashSparkData} color="#00D4FF" />}
-                >
-                  <div className="flex items-center gap-2">
-                    <AnimatedNumber
-                      value={cashBalance}
-                      prefix="$"
-                      className="text-2xl font-bold text-white"
-                    />
-                    {cashBurn?.burnTrend === 'increasing' ? (
-                      <TrendingDown className="w-4 h-4 text-[#FF3B3B]" />
-                    ) : (
-                      <TrendingUp className="w-4 h-4 text-[#00FF88]" />
-                    )}
-                  </div>
+                <MetricCard label="Monthly Income">
+                  <AnimatedNumber value={totalRevenue} prefix="$" className="text-2xl font-bold text-[#00FF88]" />
                 </MetricCard>
               </motion.div>
-
-              {/* Burn Rate */}
               <motion.div variants={itemVariants}>
-                <MetricCard
-                  label="Monthly Burn Rate"
-                  health={burnHealth(monthlyBurn, totalRevenue)}
-                  footer={
-                    <div className="flex items-center justify-between">
-                      <SparkLine data={burnSparkData} color="#FFB800" />
-                      <GlowBadge
-                        status={burnHealth(monthlyBurn, totalRevenue)}
-                        label={cashBurn?.burnTrend === 'decreasing' ? 'Improving' : cashBurn?.burnTrend === 'increasing' ? 'Rising' : 'Stable'}
-                      />
-                    </div>
-                  }
-                >
-                  <AnimatedNumber
-                    value={monthlyBurn}
-                    prefix="$"
-                    className="text-2xl font-bold text-white"
-                  />
-                </MetricCard>
-              </motion.div>
-
-              {/* Runway */}
-              <motion.div variants={itemVariants}>
-                <MetricCard
-                  label="Runway"
-                  health={runwayHealth(runway)}
-                  className="col-span-2 md:col-span-1"
-                >
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className={`text-3xl font-bold font-['JetBrains_Mono',monospace] hud-countdown ${runwayColor(runway)}`}
-                    >
-                      <AnimatedNumber value={runway} className={runwayColor(runway)} />
-                    </span>
-                    <span className="text-sm text-white/40 uppercase tracking-wider">months</span>
-                  </div>
-                  {runway < 6 && (
-                    <motion.div
-                      className="flex items-center gap-1 mt-2 text-[#FF3B3B] text-xs"
-                      animate={{ opacity: [0.6, 1, 0.6] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    >
-                      <AlertCircle className="w-3 h-3" />
-                      <span>Critical runway warning</span>
-                    </motion.div>
-                  )}
+                <MetricCard label={isProfit ? 'Net Profit' : 'Net Loss'}>
+                  <AnimatedNumber value={Math.abs(netProfit)} prefix={isProfit ? '+$' : '-$'} className={`text-2xl font-bold ${isProfit ? 'text-[#00FF88]' : 'text-[#FF3B3B]'}`} />
                 </MetricCard>
               </motion.div>
             </motion.div>
 
-            {/* ── Two-column layout: Agenda + Briefing ───────────────── */}
+            {/* ── Three-column layout: Action Items + Agenda + Briefing ── */}
             <motion.div
-              className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+              className="grid grid-cols-1 lg:grid-cols-3 gap-6"
               variants={containerVariants}
             >
+              {/* Action Items */}
+              <motion.div variants={itemVariants}>
+                <ActionItemsWidget />
+              </motion.div>
+
               {/* Today's Agenda */}
               <motion.div variants={itemVariants}>
                 <HudPanel title="Today's Agenda" delay={0.6}>
@@ -616,126 +610,13 @@ export default function CommandCenter() {
               </motion.div>
             </motion.div>
 
-            {/* ── Net Profit/Loss + Quick Stats ──────────────────────── */}
-            <motion.div
-              className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-              variants={containerVariants}
-            >
-              {/* Net Profit/Loss This Month */}
-              <motion.div variants={itemVariants}>
-                <HudPanel title="Net Profit/Loss This Month" delay={0.9}>
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1">
-                      <div
-                        className={`text-3xl font-bold font-['JetBrains_Mono',monospace] ${
-                          isProfit ? 'text-[#00FF88] text-glow-blue' : 'text-[#FF3B3B]'
-                        }`}
-                        style={
-                          isProfit
-                            ? { textShadow: '0 0 15px rgba(0,255,136,0.4)' }
-                            : { textShadow: '0 0 15px rgba(255,59,59,0.4)' }
-                        }
-                      >
-                        <AnimatedNumber
-                          value={Math.abs(netProfit)}
-                          prefix={isProfit ? '+$' : '-$'}
-                          className={isProfit ? 'text-[#00FF88]' : 'text-[#FF3B3B]'}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1 mt-1">
-                        {isProfit ? (
-                          <TrendingUp className="w-3 h-3 text-[#00FF88]" />
-                        ) : (
-                          <TrendingDown className="w-3 h-3 text-[#FF3B3B]" />
-                        )}
-                        <span className="text-xs text-white/40">
-                          {isProfit ? 'Profitable' : 'Net loss'} this period
-                        </span>
-                      </div>
-                    </div>
-
-                    <MiniBarChart income={totalRevenue} expenses={totalExpenses} />
-                  </div>
-                </HudPanel>
-              </motion.div>
-
-              {/* Quick Stats */}
-              <motion.div className="lg:col-span-2" variants={itemVariants}>
-                <HudPanel title="Quick Stats" delay={1.0}>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {/* Active Clients */}
-                    <div className="flex flex-col items-center p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                      <Users className="w-5 h-5 text-[#00D4FF] mb-2" />
-                      <AnimatedNumber
-                        value={activeClients}
-                        className="text-xl font-bold text-white"
-                      />
-                      <span className="text-[10px] text-white/40 uppercase tracking-wider mt-1">
-                        Active Clients
-                      </span>
-                    </div>
-
-                    {/* Total Cranes */}
-                    <div className="flex flex-col items-center p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                      <Truck className="w-5 h-5 text-[#FFB800] mb-2" />
-                      <AnimatedNumber
-                        value={totalCranes}
-                        className="text-xl font-bold text-white"
-                      />
-                      <span className="text-[10px] text-white/40 uppercase tracking-wider mt-1">
-                        Cranes on Platform
-                      </span>
-                    </div>
-
-                    {/* Commissions Outstanding */}
-                    <div className="flex flex-col items-center p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                      <DollarSign className="w-5 h-5 text-[#00FF88] mb-2" />
-                      <AnimatedNumber
-                        value={commissionsOutstanding}
-                        prefix="$"
-                        className="text-xl font-bold text-white"
-                      />
-                      <span className="text-[10px] text-white/40 uppercase tracking-wider mt-1">
-                        Commissions Owed
-                      </span>
-                    </div>
-
-                    {/* AI Requests Today */}
-                    <div className="flex flex-col items-center p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                      <Cpu className="w-5 h-5 text-[#00D4FF] mb-2" />
-                      <div className="flex items-baseline gap-1">
-                        <AnimatedNumber
-                          value={aiRequestsToday}
-                          className="text-xl font-bold text-white"
-                        />
-                        <span className="text-xs text-white/30 font-['JetBrains_Mono',monospace]">
-                          / {aiDailyLimit}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-white/40 uppercase tracking-wider mt-1">
-                        AI Requests Today
-                      </span>
-                      {/* Usage bar */}
-                      <div className="w-full h-1 bg-white/[0.06] rounded-full mt-2 overflow-hidden">
-                        <motion.div
-                          className={`h-full rounded-full ${
-                            aiRequestsToday / aiDailyLimit > 0.9
-                              ? 'bg-[#FF3B3B]'
-                              : aiRequestsToday / aiDailyLimit > 0.7
-                                ? 'bg-[#FFB800]'
-                                : 'bg-[#00D4FF]'
-                          }`}
-                          initial={{ width: 0 }}
-                          animate={{
-                            width: `${Math.min((aiRequestsToday / aiDailyLimit) * 100, 100)}%`,
-                          }}
-                          transition={{ duration: 1, delay: 1.2 }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </HudPanel>
-              </motion.div>
+            {/* ── Clients ───────────────────────────────────────────── */}
+            <motion.div variants={itemVariants}>
+              <div className="flex items-center gap-6 px-5 py-3 bg-[#0D1321]/80 border border-[#1A2035] rounded-lg">
+                <Users className="w-4 h-4 text-[#00D4FF]" />
+                <span className="text-sm text-white/80">{activeClients} active clients</span>
+                <Link to="/clients" className="text-xs text-[#00D4FF] hover:underline ml-auto">View all</Link>
+              </div>
             </motion.div>
 
             {/* ── Bottom edge scanline ───────────────────────────────── */}

@@ -166,6 +166,10 @@ export const transactions = {
     return unwrap(await api.post<ApiResponse<{ updated: number }>>('/transactions/bulk-categorize', data));
   },
 
+  recategorize: async () => {
+    return unwrap(await api.post<ApiResponse<{ total: number; recategorized: number; remaining: number }>>('/transactions/recategorize'));
+  },
+
   getSummary: async (params?: { startDate?: string; endDate?: string }) => {
     return unwrap(
       await api.get<
@@ -252,18 +256,18 @@ export const metrics = {
   },
 
   updateCashBalance: async (balance: number) => {
-    return unwrap(await api.put<ApiResponse<{ cashBalance: number }>>('/metrics/cash-balance', { balance }));
+    return unwrap(await api.post<ApiResponse<{ cashBalance: number }>>('/metrics/cash-balance', { balance }));
   },
 
   getRevenueSnapshots: async () => {
     return unwrap(
-      await api.get<ApiResponse<Array<{ id: string; date: string; revenue: number; expenses: number; profit: number }>>>('/metrics/snapshots')
+      await api.get<ApiResponse<Array<{ id: string; date: string; revenue: number; expenses: number; profit: number }>>>('/metrics/revenue-snapshots')
     );
   },
 
   createSnapshot: async () => {
     return unwrap(
-      await api.post<ApiResponse<{ id: string; date: string; revenue: number; expenses: number; profit: number }>>('/metrics/snapshots')
+      await api.post<ApiResponse<{ id: string; date: string; revenue: number; expenses: number; profit: number }>>('/metrics/revenue-snapshots')
     );
   },
 };
@@ -444,7 +448,7 @@ export const statements = {
     );
   },
 
-  importStatement: async (data: { transactions: any[]; fileUploadId?: string }) => {
+  importStatement: async (data: { transactions: any[]; fileUploadId?: string; endingBalance?: number; statementDate?: string }) => {
     return unwrap(await api.post<ApiResponse<any>>('/csv/import-statement', data));
   },
 };
@@ -491,6 +495,23 @@ export const analytics = {
         transaction_count: number;
       }>>('/analytics/totals', { params })
     );
+  },
+};
+
+// ── Action Items ──────────────────────────────────────────────────────────────
+
+export const actionItems = {
+  list: async (date?: string) => {
+    return unwrap(await api.get<ApiResponse<any[]>>('/action-items', { params: { date } }));
+  },
+  create: async (data: { title: string; dueDate?: string; priority?: string }) => {
+    return unwrap(await api.post<ApiResponse<any>>('/action-items', data));
+  },
+  update: async (id: string, data: { completed?: boolean; title?: string }) => {
+    return unwrap(await api.put<ApiResponse<any>>(`/action-items/${id}`, data));
+  },
+  delete: async (id: string) => {
+    return unwrap(await api.delete<ApiResponse<void>>(`/action-items/${id}`));
   },
 };
 

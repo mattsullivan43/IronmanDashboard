@@ -1,39 +1,44 @@
-import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, FormEvent } from 'react';
+import {} from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Lock, User, AlertCircle } from 'lucide-react';
 import { auth } from '../services/api';
 import { signIn as cognitoSignIn, isCognitoConfigured, configureCognito } from '../services/cognitoAuth';
 
-// Auto-configure Cognito from env if available
-const cognitoPoolId = (window as any).__JARVIS_COGNITO_POOL_ID__ || '';
-const cognitoClientId = (window as any).__JARVIS_COGNITO_CLIENT_ID__ || '';
-const cognitoRegion = (window as any).__JARVIS_COGNITO_REGION__ || 'us-east-1';
-if (cognitoPoolId && cognitoClientId) {
-  configureCognito(cognitoPoolId, cognitoClientId, cognitoRegion);
-}
-
 export default function Login() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [configReady, setConfigReady] = useState(false);
+
+  // Fetch auth config from backend on mount
+  useEffect(() => {
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(cfg => {
+        if (cfg.authMode === 'cognito' && cfg.cognitoUserPoolId && cfg.cognitoAppClientId) {
+          configureCognito(cfg.cognitoUserPoolId, cfg.cognitoAppClientId, cfg.cognitoRegion || 'us-east-1');
+        }
+      })
+      .catch(() => {})
+      .finally(() => setConfigReady(true));
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!configReady) return;
     setError('');
     setLoading(true);
 
     try {
-      // Try Cognito auth first if configured
       if (isCognitoConfigured()) {
         await cognitoSignIn(email, password);
       } else {
-        // Fall back to local JWT auth
         await auth.login(email, password);
       }
-      navigate('/', { replace: true });
+      // Full page reload so App re-checks auth fresh
+      window.location.href = '/';
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Authentication failed';
       setError(message);

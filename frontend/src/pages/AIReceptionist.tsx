@@ -89,13 +89,11 @@ export default function AIReceptionist() {
             .filter((c: any) => c.setup_fee_collected)
             .reduce((s: number, c: any) => s + parseFloat(c.setup_fee ?? 0), 0),
           averageMargin: totalMrr > 0 ? (totalMrr - totalCogs) / totalMrr : 0,
-          cogsBreakdown: [
-            { name: 'Retell AI', value: totalCogs * 0.45 },
-            { name: 'n8n Hosting', value: totalCogs * 0.15 },
-            { name: 'Twilio', value: totalCogs * 0.15 },
-            { name: 'OpenAI APIs', value: totalCogs * 0.15 },
-            { name: 'Infrastructure', value: totalCogs * 0.10 },
-          ].filter(c => c.value > 0),
+          cogsBreakdown: Array.isArray(r?.cogs_breakdown) && r.cogs_breakdown.length > 0
+            ? r.cogs_breakdown.map((c: any) => ({ name: c.name, value: parseFloat(c.value ?? 0) })).filter((c: { name: string; value: number }) => c.value > 0)
+            : totalCogs > 0
+              ? [{ name: 'Total COGS', value: totalCogs }]
+              : [],
           revenueVsCogsTrend: [],
         });
 
@@ -119,42 +117,16 @@ export default function AIReceptionist() {
         }));
       } catch (err) {
         console.error('Failed to load AI Receptionist data', err);
-        // Fallback demo data for development
+        // Empty defaults — no fake data
         setData({
-          totalClients: 12,
-          totalMonthlyRecurring: 8400,
-          totalSetupFeesCollected: 18000,
-          averageMargin: 0.68,
-          cogsBreakdown: [
-            { name: 'Retell AI', value: 1450 },
-            { name: 'n8n Hosting', value: 320 },
-            { name: 'Twilio / Telephony', value: 280 },
-            { name: 'OpenAI APIs', value: 410 },
-            { name: 'Infrastructure', value: 220 },
-          ],
-          revenueVsCogsTrend: [
-            { month: '2025-10', revenue: 4200, cogs: 1400 },
-            { month: '2025-11', revenue: 5600, cogs: 1750 },
-            { month: '2025-12', revenue: 6300, cogs: 2050 },
-            { month: '2026-01', revenue: 7100, cogs: 2200 },
-            { month: '2026-02', revenue: 7800, cogs: 2500 },
-            { month: '2026-03', revenue: 8400, cogs: 2680 },
-          ],
+          totalClients: 0,
+          totalMonthlyRecurring: 0,
+          totalSetupFeesCollected: 0,
+          averageMargin: 0,
+          cogsBreakdown: [],
+          revenueVsCogsTrend: [],
         });
-        setClientData([
-          { id: '1', company: 'Sullivan Plumbing', setupFee: 1500, setupCollected: true, monthlyFee: 800, monthlyCOGS: 240, grossMargin: 560, grossMarginPercent: 0.70 },
-          { id: '2', company: 'Metro Dental Group', setupFee: 1500, setupCollected: true, monthlyFee: 750, monthlyCOGS: 280, grossMargin: 470, grossMarginPercent: 0.627 },
-          { id: '3', company: 'Peak HVAC', setupFee: 1500, setupCollected: true, monthlyFee: 700, monthlyCOGS: 210, grossMargin: 490, grossMarginPercent: 0.70 },
-          { id: '4', company: 'Lakeside Law', setupFee: 1500, setupCollected: false, monthlyFee: 850, monthlyCOGS: 300, grossMargin: 550, grossMarginPercent: 0.647 },
-          { id: '5', company: 'Bright Smile Orthodontics', setupFee: 1500, setupCollected: true, monthlyFee: 700, monthlyCOGS: 230, grossMargin: 470, grossMarginPercent: 0.671 },
-          { id: '6', company: 'Elite Auto Body', setupFee: 1500, setupCollected: true, monthlyFee: 650, monthlyCOGS: 220, grossMargin: 430, grossMarginPercent: 0.662 },
-          { id: '7', company: 'Greenfield Landscaping', setupFee: 1500, setupCollected: true, monthlyFee: 600, monthlyCOGS: 190, grossMargin: 410, grossMarginPercent: 0.683 },
-          { id: '8', company: 'City Chiropractic', setupFee: 1500, setupCollected: true, monthlyFee: 750, monthlyCOGS: 260, grossMargin: 490, grossMarginPercent: 0.653 },
-          { id: '9', company: 'Harbor Insurance', setupFee: 1500, setupCollected: false, monthlyFee: 800, monthlyCOGS: 290, grossMargin: 510, grossMarginPercent: 0.638 },
-          { id: '10', company: 'Apex Roofing', setupFee: 1500, setupCollected: true, monthlyFee: 650, monthlyCOGS: 200, grossMargin: 450, grossMarginPercent: 0.692 },
-          { id: '11', company: 'TrueNorth Realty', setupFee: 1500, setupCollected: true, monthlyFee: 700, monthlyCOGS: 240, grossMargin: 460, grossMarginPercent: 0.657 },
-          { id: '12', company: 'Precision Electric', setupFee: 1500, setupCollected: true, monthlyFee: 650, monthlyCOGS: 220, grossMargin: 430, grossMarginPercent: 0.662 },
-        ]);
+        setClientData([]);
       } finally {
         setLoading(false);
       }

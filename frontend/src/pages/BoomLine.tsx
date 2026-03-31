@@ -104,7 +104,7 @@ export default function BoomLine() {
           totalMRR: totalRev,
           implementationFeesCollected: apiClients.filter((c: any) => c.implementation_fee_collected).reduce((s: number, c: any) => s + parseFloat(c.implementation_fee ?? 0), 0),
           implementationFeesOutstanding: apiClients.filter((c: any) => !c.implementation_fee_collected).reduce((s: number, c: any) => s + parseFloat(c.implementation_fee ?? 0), 0),
-          cranesOverTime: Array.isArray(r?.history) ? r.history.map((h: any) => ({ month: h.month, cranes: h.boomline_mrr ? Math.round(parseFloat(h.boomline_mrr) / 35) : 0 })) : [],
+          cranesOverTime: Array.isArray(r?.history) ? r.history.map((h: any) => ({ month: h.month, cranes: h.crane_count ?? 0 })) : [],
         });
 
         // Map client data
@@ -122,32 +122,20 @@ export default function BoomLine() {
         })));
       } catch (err) {
         console.error('Failed to load BoomLine data', err);
-        // Fallback demo data for development
+        // No fallback data — show empty state when API is unavailable
         setData({
-          totalCranes: 247,
-          revenuePerCrane: 37.5,
-          costPerCrane: 6.75,
-          costPercentage: 0.18,
-          grossProfitPerCrane: 30.75,
-          grossMargin: 0.82,
-          totalMRR: 9262,
-          implementationFeesCollected: 90000,
-          implementationFeesOutstanding: 30000,
-          cranesOverTime: [
-            { month: '2025-10', cranes: 80 },
-            { month: '2025-11', cranes: 110 },
-            { month: '2025-12', cranes: 145 },
-            { month: '2026-01', cranes: 185 },
-            { month: '2026-02', cranes: 220 },
-            { month: '2026-03', cranes: 247 },
-          ],
+          totalCranes: 0,
+          revenuePerCrane: 0,
+          costPerCrane: 0,
+          costPercentage: 0,
+          grossProfitPerCrane: 0,
+          grossMargin: 0,
+          totalMRR: 0,
+          implementationFeesCollected: 0,
+          implementationFeesOutstanding: 0,
+          cranesOverTime: [],
         });
-        setClientData([
-          { id: '1', company: 'Crane Corp Alpha', craneCount: 85, perCraneRate: 38, monthlyRevenue: 3230, implementationFee: 30000, implementationCollected: true, margin: 0.84 },
-          { id: '2', company: 'Heavy Lift LLC', craneCount: 62, perCraneRate: 36, monthlyRevenue: 2232, implementationFee: 30000, implementationCollected: true, margin: 0.81 },
-          { id: '3', company: 'SkyHook Industries', craneCount: 50, perCraneRate: 40, monthlyRevenue: 2000, implementationFee: 30000, implementationCollected: false, margin: 0.85 },
-          { id: '4', company: 'Titan Crane Services', craneCount: 50, perCraneRate: 36, monthlyRevenue: 1800, implementationFee: 30000, implementationCollected: true, margin: 0.79 },
-        ]);
+        setClientData([]);
       } finally {
         setLoading(false);
       }
@@ -286,7 +274,6 @@ export default function BoomLine() {
               <GlowBadge
                 status={revenueHealth(data.revenuePerCrane)}
                 label={data.revenuePerCrane >= 30 ? 'On Target' : 'Below Target'}
-                value={`$30-45`}
               />
             </div>
           </div>
@@ -387,50 +374,8 @@ export default function BoomLine() {
         />
       </HudPanel>
 
-      {/* Pricing Tier Reference */}
-      <HudPanel title="Pricing Tier Reference" delay={0.6}>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.65, duration: 0.4 }}
-            className="text-center p-4 rounded-lg border border-[#00D4FF]/10 bg-[#00D4FF]/5"
-          >
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Per Crane / Month</div>
-            <div className="text-2xl font-bold text-[#00D4FF] font-['JetBrains_Mono',monospace]">
-              $30 - $45
-            </div>
-            <div className="text-xs text-white/30 mt-1">Volume-based pricing</div>
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7, duration: 0.4 }}
-            className="text-center p-4 rounded-lg border border-[#FFB800]/10 bg-[#FFB800]/5"
-          >
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Monthly Floor</div>
-            <div className="text-2xl font-bold text-[#FFB800] font-['JetBrains_Mono',monospace]">
-              $300
-            </div>
-            <div className="text-xs text-white/30 mt-1">Minimum per client</div>
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.75, duration: 0.4 }}
-            className="text-center p-4 rounded-lg border border-[#00FF88]/10 bg-[#00FF88]/5"
-          >
-            <div className="text-xs uppercase tracking-wider text-white/40 mb-2">Implementation Fee</div>
-            <div className="text-2xl font-bold text-[#00FF88] font-['JetBrains_Mono',monospace]">
-              $30,000
-            </div>
-            <div className="text-xs text-white/30 mt-1">One-time onboarding</div>
-          </motion.div>
-        </div>
-      </HudPanel>
-
       {/* Per-Client Breakdown Table */}
-      <HudPanel title="Per-Client Breakdown" delay={0.7}>
+      <HudPanel title="Per-Client Breakdown" delay={0.6}>
         <DataTable
           columns={columns}
           data={clientData}

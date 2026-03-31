@@ -48,7 +48,7 @@ jobs:
           CMD_ID=$(aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["cd /home/ec2-user/jarvis-app && aws s3 cp s3://jarvis-deploy-1774901798/jarvis-deploy.tar.gz . && tar xzf jarvis-deploy.tar.gz && cd backend && npm ci --omit=dev 2>&1 | tail -3 && pkill -f \"node dist/index.js\" 2>/dev/null; sleep 2 && nohup node dist/index.js > /home/ec2-user/jarvis.log 2>&1 & sleep 5 && curl -sf http://localhost:3000/api/health && echo DEPLOY_SUCCESS"],"executionTimeout":["120"]}' \
+            --parameters '{"commands":["cd /home/ec2-user/jarvis-app && aws s3 cp s3://jarvis-deploy-1774901798/jarvis-deploy.tar.gz . && tar xzf jarvis-deploy.tar.gz && cd backend && npm ci --omit=dev 2>&1 | tail -3 && pm2 restart jarvis --update-env 2>/dev/null || pm2 start dist/index.js --name jarvis --log /home/ec2-user/jarvis.log && pm2 save && sleep 5 && curl -sf http://localhost:3000/api/health && echo DEPLOY_SUCCESS"],"executionTimeout":["120"]}' \
             --timeout-seconds 120 \
             --query "Command.CommandId" --output text)
 

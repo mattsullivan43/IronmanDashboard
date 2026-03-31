@@ -1,8 +1,36 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { query } from '../database/connection';
+import { categorizeTransaction } from '../services/categorizer';
 
 const router = Router();
+
+// POST /api/transactions/recategorize - re-run auto-categorization on uncategorized transactions
+router.post('/recategorize', async (req: Request, res: Response) => {
+  try {
+    const uncategorized = await query<{ id: string; description: string }>(
+      "SELECT id, description FROM transactions WHERE category = 'Uncategorized' OR category IS NULL OR category = ''",
+      []
+    );
+
+    let updated = 0;
+    for (const tx of uncategorized) {
+      const category = await categorizeTransaction(tx.description || '');
+      if (category !== 'Uncategorized') {
+        await query('UPDATE transactions SET category = ? WHERE id = ?', [category, tx.id]);
+        updated++;
+      }
+    }
+
+    return res.json({
+      success: true,
+      data: { total: uncategorized.length, recategorized: updated, remaining: uncategorized.length - updated },
+    });
+  } catch (err: any) {
+    console.error('Recategorize error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
 
 // GET /api/transactions/summary - monthly inflows vs outflows
 router.get('/summary', async (req: Request, res: Response) => {
@@ -72,13 +100,17 @@ router.get('/by-category', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/transactions/bulk-categorize
-router.put('/bulk-categorize', async (req: Request, res: Response) => {
+// POST/PUT /api/transactions/bulk-categorize
+router.post('/bulk-categorize', bulkCategorizeHandler);
+router.put('/bulk-categorize', bulkCategorizeHandler);
+
+async function bulkCategorizeHandler(req: Request, res: Response) {
   try {
-    const { transaction_ids, category } = req.body;
+    const transaction_ids = req.body.transaction_ids || req.body.ids;
+    const { category } = req.body;
 
     if (!transaction_ids || !Array.isArray(transaction_ids) || transaction_ids.length === 0) {
-      return res.status(400).json({ success: false, error: 'transaction_ids array is required' });
+      return res.status(400).json({ success: false, error: 'ids array is required' });
     }
     if (!category) {
       return res.status(400).json({ success: false, error: 'category is required' });
@@ -104,7 +136,7 @@ router.put('/bulk-categorize', async (req: Request, res: Response) => {
     console.error('Bulk categorize error:', err);
     return res.status(500).json({ success: false, error: 'Internal server error' });
   }
-});
+}
 
 // GET /api/transactions - list with filters and pagination
 router.get('/', async (req: Request, res: Response) => {

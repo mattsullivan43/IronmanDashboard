@@ -24,7 +24,7 @@ export default function AnimatedNumber({
   const isInView = useInView(ref, { once: true, margin: '-50px' });
   const motionValue = useMotionValue(0);
   const display = useTransform(motionValue, (latest) => {
-    const formatted = latest.toLocaleString('en-US', {
+    const formatted = (latest ?? 0).toLocaleString('en-US', {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     });
@@ -33,7 +33,7 @@ export default function AnimatedNumber({
 
   useEffect(() => {
     if (isInView) {
-      const controls = animate(motionValue, value, {
+      const controls = animate(motionValue, value ?? 0, {
         duration,
         ease: [0.25, 0.46, 0.45, 0.94],
       });

@@ -21,6 +21,7 @@ import settingsRouter from './routes/settings';
 import csvRouter from './routes/csv';
 import exportRouter from './routes/export';
 import analyticsRouter from './routes/analytics';
+import actionItemsRouter from './routes/actionItems';
 
 async function startServer(): Promise<void> {
   console.log('[JARVIS] Initializing database...');
@@ -47,6 +48,14 @@ async function startServer(): Promise<void> {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // Disable caching on all API responses
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
+
   // Uploads directory
   app.use('/uploads', express.static(path.resolve(__dirname, '..', 'uploads')));
 
@@ -60,8 +69,8 @@ async function startServer(): Promise<void> {
     });
   });
 
-  // Auth routes (unauthenticated)
-  app.use('/api/auth', createAuthRouter());
+  // Auth routes (login is unauthenticated, verify/change-password use cognito-aware middleware)
+  app.use('/api/auth', createAuthRouter(cognitoAuthMiddleware));
 
   // Protected API routes — cognitoAuthMiddleware handles both modes:
   // AUTH_MODE=cognito → verifies Cognito JWT
@@ -77,6 +86,7 @@ async function startServer(): Promise<void> {
   app.use('/api/csv', protect, csvRouter);
   app.use('/api/export', protect, exportRouter);
   app.use('/api/analytics', protect, analyticsRouter);
+  app.use('/api/action-items', protect, actionItemsRouter);
 
   // Cognito config endpoint (unauthenticated — frontend needs this to configure)
   app.get('/api/config', (_req, res) => {

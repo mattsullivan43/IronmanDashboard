@@ -165,13 +165,49 @@ export async function parseCitibankPdf(filePath: string): Promise<ParsedStatemen
     balance: number | null;
   } | null = null;
 
+  // Track previous balance to determine debit vs credit from balance changes
+  let previousBalance = beginningBalance;
+
   function finalizeTx(tx: typeof currentTx) {
     if (!tx) return;
     const description = tx.descLines.join(' ').replace(/\s+/g, ' ').trim();
-    const isCredit = tx.credit !== null && tx.credit > 0;
-    const amount = isCredit ? tx.credit! : -(tx.debit || 0);
-    const type: 'income' | 'expense' = isCredit ? 'income' : 'expense';
     const balance = tx.balance || 0;
+    const rawAmount = tx.debit || tx.credit || 0;
+
+    // Use running balance to determine debit vs credit — this is 100% reliable
+    // If balance went down, it's a debit (expense). If up, it's a credit (income).
+    let type: 'income' | 'expense';
+    let amount: number;
+
+    if (previousBalance !== 0 && balance !== 0) {
+      const balanceDiff = balance - previousBalance;
+      if (balanceDiff < 0) {
+        type = 'expense';
+        amount = -Math.abs(rawAmount);
+      } else {
+        type = 'income';
+        amount = Math.abs(rawAmount);
+      }
+    } else {
+      // Fallback: use description keywords
+      const descUpper = description.toUpperCase();
+      const isDebit = /DEBIT|ACH DEBIT|ZELLE SENT|BILL PAY|WITHDRAWAL/.test(descUpper);
+      const isCredit = /CREDIT|DEPOSIT|ELECTRONIC CREDIT|ZELLE FROM/.test(descUpper);
+      if (isDebit) {
+        type = 'expense';
+        amount = -Math.abs(rawAmount);
+      } else if (isCredit) {
+        type = 'income';
+        amount = Math.abs(rawAmount);
+      } else {
+        // Final fallback: original column heuristic
+        const isColumnCredit = tx.credit !== null && tx.credit > 0;
+        type = isColumnCredit ? 'income' : 'expense';
+        amount = isColumnCredit ? tx.credit! : -(tx.debit || 0);
+      }
+    }
+
+    previousBalance = balance;
 
     // Convert MM/DD to YYYY-MM-DD
     const [mm, dd] = tx.rawDate.split('/');

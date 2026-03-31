@@ -381,9 +381,11 @@ router.post(
 // POST /api/csv/import-statement - import confirmed transactions from a parsed statement
 router.post('/import-statement', async (req: Request, res: Response) => {
   try {
-    const { upload_id, transactions } = req.body as {
+    const { upload_id, transactions, endingBalance, statementDate } = req.body as {
       upload_id?: string;
       transactions?: ParsedTransaction[];
+      endingBalance?: number;
+      statementDate?: string;
     };
 
     if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
@@ -438,6 +440,16 @@ router.post('/import-statement', async (req: Request, res: Response) => {
       await query(
         'UPDATE csv_uploads SET row_count = ? WHERE id = ?',
         [imported, fileUploadId]
+      );
+    }
+
+    // Auto-update cash balance from statement ending balance
+    if (imported > 0 && endingBalance && endingBalance > 0) {
+      const balanceDate = statementDate || transactions[transactions.length - 1]?.date || new Date().toISOString().slice(0, 10);
+      const balanceId = require('crypto').randomUUID();
+      await query(
+        `INSERT INTO cash_balances (id, balance, source, date, notes) VALUES (?, ?, 'statement', ?, ?)`,
+        [balanceId, endingBalance, balanceDate, 'Auto-imported from bank statement']
       );
     }
 

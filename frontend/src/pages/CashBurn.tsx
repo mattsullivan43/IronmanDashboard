@@ -28,7 +28,6 @@ import AnimatedNumber from '../components/ui/AnimatedNumber';
 import GlowBadge from '../components/ui/GlowBadge';
 import DateRangeFilter from '../components/ui/DateRangeFilter';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
 import { metrics } from '../services/api';
 import { formatCurrency } from '../utils/format';
 import type { CashBurnMetrics, MetricsOverview } from '../types';
@@ -332,7 +331,7 @@ export default function CashBurn() {
         )}
       </AnimatePresence>
 
-      {/* ── Cash Balance Hero ────────────────────────────────────────────── */}
+      {/* ── Cash Balance Hero + Manual Update ───────────────────────────── */}
       <motion.div variants={fadeUp}>
         <HudPanel className="text-center py-8">
           <motion.div
@@ -357,11 +356,78 @@ export default function CashBurn() {
                 className="text-5xl md:text-6xl font-bold text-white"
               />
             </div>
+
+            {/* Inline balance update */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.0 }}
+              className="mt-6 max-w-md mx-auto"
+            >
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 font-mono text-sm">$</span>
+                  <input
+                    type="number"
+                    placeholder="Enter new balance..."
+                    value={cashInput}
+                    onChange={(e) => setCashInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCashUpdate(); }}
+                    className="w-full bg-[#0D1321]/80 border border-[#1A2035] rounded-lg pl-7 pr-3 py-2.5 text-sm font-mono text-white placeholder-white/20 focus:outline-none focus:border-jarvis-blue/50 focus:ring-1 focus:ring-jarvis-blue/30 transition-colors"
+                  />
+                </div>
+                <Button
+                  onClick={handleCashUpdate}
+                  loading={updating}
+                  disabled={!cashInput || isNaN(parseFloat(cashInput))}
+                  icon={<RefreshCw className="w-4 h-4" />}
+                >
+                  Update Balance
+                </Button>
+                <AnimatePresence>
+                  {updateSuccess && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.8, x: -10 }}
+                      animate={{ opacity: 1, scale: 1, x: 0 }}
+                      exit={{ opacity: 0, scale: 0.8, x: 10 }}
+                      className="flex items-center gap-1.5 text-jarvis-green"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span className="text-xs font-medium">Saved</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Runway calculation breakdown */}
+              {cashInput && !isNaN(parseFloat(cashInput)) && monthlyBurn > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mt-3 bg-[#0D1321]/60 border border-[#1A2035] rounded-lg px-4 py-3"
+                >
+                  <div className="flex items-center justify-center gap-2 text-xs font-mono text-white/50">
+                    <span className="text-jarvis-blue">{formatCurrency(parseFloat(cashInput))}</span>
+                    <span className="text-white/30">/</span>
+                    <span className="text-jarvis-red">{formatCurrency(monthlyBurn)}/mo burn</span>
+                    <span className="text-white/30">=</span>
+                    <span
+                      className="font-semibold"
+                      style={{ color: getRunwayColor(parseFloat(cashInput) / monthlyBurn) }}
+                    >
+                      {(parseFloat(cashInput) / monthlyBurn).toFixed(1)} months runway
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+
             <motion.p
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 1.2 }}
-              className="text-xs text-white/30 mt-3 font-mono"
+              className="text-xs text-white/30 mt-4 font-mono"
             >
               Last updated: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             </motion.p>
@@ -622,48 +688,6 @@ export default function CashBurn() {
               </LineChart>
             </ResponsiveContainer>
           </motion.div>
-        </HudPanel>
-      </motion.div>
-
-      {/* ── Manual Cash Balance Update ───────────────────────────────────── */}
-      <motion.div variants={fadeUp}>
-        <HudPanel title="Update Cash Balance" delay={0.7}>
-          <div className="flex flex-col sm:flex-row items-end gap-4">
-            <div className="flex-1 w-full">
-              <Input
-                label="Current Cash Balance"
-                type="number"
-                placeholder="Enter cash balance..."
-                value={cashInput}
-                onChange={(e) => setCashInput(e.target.value)}
-                icon={<Banknote className="w-4 h-4" />}
-                className="font-mono"
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={handleCashUpdate}
-                loading={updating}
-                disabled={!cashInput || isNaN(parseFloat(cashInput))}
-                icon={<RefreshCw className="w-4 h-4" />}
-              >
-                Update
-              </Button>
-              <AnimatePresence>
-                {updateSuccess && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8, x: -10 }}
-                    animate={{ opacity: 1, scale: 1, x: 0 }}
-                    exit={{ opacity: 0, scale: 0.8, x: 10 }}
-                    className="flex items-center gap-1.5 text-jarvis-green"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="text-xs font-medium">Updated</span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
         </HudPanel>
       </motion.div>
 

@@ -102,52 +102,49 @@ export default function Revenue() {
   const growth = revenueData?.growth ?? 0;
   const byMonth = Array.isArray(revenueData?.byMonth) ? revenueData.byMonth : [];
 
-  // Synthesize net new MRR breakdown from growth data
-  const newMrr = mrr * Math.max(growth, 0) * 0.6;
-  const expansionMrr = mrr * Math.max(growth, 0) * 0.4;
-  const churnedMrr = growth < 0 ? mrr * Math.abs(growth) : mrr * 0.015;
+  // Net new MRR breakdown — sourced from API when available, otherwise 0
+  const newMrr = 0;
+  const expansionMrr = 0;
+  const churnedMrr = 0;
   const netNewMrr = newMrr + expansionMrr - churnedMrr;
 
-  // Churn rate derived from unit economics (default estimate)
-  const churnRate = churnedMrr / (mrr || 1);
+  // Churn rate — no hardcoded estimate; 0 until real data is available
+  const churnRate = 0;
   const churnTarget = 0.02;
   const churnIsHealthy = churnRate < churnTarget;
 
-  // Net Revenue Retention
-  const nrr = mrr > 0 ? (mrr + expansionMrr - churnedMrr) / (mrr - netNewMrr || 1) : 1;
+  // Net Revenue Retention — 0 until real data is available
+  const nrr = 0;
   const nrrHealthy = nrr >= 1.0;
 
-  // Product line breakdown (derived from byCategory)
+  // Product line breakdown — driven entirely by byCategory from the API
   const categories = Array.isArray(revenueData?.byCategory) ? revenueData.byCategory : [];
-  const productLines: ProductLine[] = [
-    {
-      name: 'BoomLine',
-      mrr: categories.find((c) => c.category.toLowerCase().includes('boom'))?.amount ?? mrr * 0.45,
-      unitCount: 12,
-      unitLabel: 'cranes',
-      color: '#00D4FF',
-      icon: <Construction className="w-4 h-4" />,
-      sparkline: byMonth.slice(-6).map((m) => m.revenue * 0.45),
-    },
-    {
-      name: 'AI Receptionist',
-      mrr: categories.find((c) => c.category.toLowerCase().includes('ai'))?.amount ?? mrr * 0.30,
-      unitCount: 24,
-      unitLabel: 'clients',
-      color: '#FFB800',
-      icon: <Bot className="w-4 h-4" />,
-      sparkline: byMonth.slice(-6).map((m) => m.revenue * 0.30),
-    },
-    {
-      name: 'Custom Software',
-      mrr: categories.find((c) => c.category.toLowerCase().includes('custom'))?.amount ?? mrr * 0.25,
-      unitCount: 3,
-      unitLabel: 'projects',
-      color: '#00FF88',
-      icon: <Code2 className="w-4 h-4" />,
-      sparkline: byMonth.slice(-6).map((m) => m.revenue * 0.25),
-    },
-  ];
+
+  const iconMap: Record<string, React.ReactNode> = {
+    boom: <Construction className="w-4 h-4" />,
+    ai: <Bot className="w-4 h-4" />,
+    custom: <Code2 className="w-4 h-4" />,
+  };
+  const colorMap: Record<string, string> = {
+    boom: '#00D4FF',
+    ai: '#FFB800',
+    custom: '#00FF88',
+  };
+  const defaultColor = '#00D4FF';
+  const defaultIcon = <Code2 className="w-4 h-4" />;
+
+  const productLines: ProductLine[] = categories.map((cat) => {
+    const key = Object.keys(iconMap).find((k) => cat.category.toLowerCase().includes(k));
+    return {
+      name: cat.category,
+      mrr: cat.amount,
+      unitCount: 0,
+      unitLabel: '',
+      color: key ? colorMap[key] : defaultColor,
+      icon: key ? iconMap[key] : defaultIcon,
+      sparkline: [],
+    };
+  });
 
   // MRR sparkline from snapshots
   const mrrSparkline = snapshots.length > 1
@@ -355,6 +352,7 @@ export default function Revenue() {
           animate="visible"
           variants={sectionVariants}
         >
+          {productLines.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {productLines.map((pl, i) => (
               <HudPanel key={pl.name} delay={0.4 + i * 0.1}>
@@ -371,9 +369,11 @@ export default function Revenue() {
                         <p className="text-xs font-semibold uppercase tracking-wider text-white/50">
                           {pl.name}
                         </p>
-                        <p className="text-[10px] text-white/25 font-mono">
-                          {pl.unitCount} {pl.unitLabel}
-                        </p>
+                        {pl.unitCount > 0 && pl.unitLabel && (
+                          <p className="text-[10px] text-white/25 font-mono">
+                            {pl.unitCount} {pl.unitLabel}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -405,6 +405,13 @@ export default function Revenue() {
               </HudPanel>
             ))}
           </div>
+          ) : (
+            <HudPanel title="Revenue by Product Line" delay={0.4}>
+              <div className="text-center text-white/20 text-sm font-mono py-6">
+                No product line data available
+              </div>
+            </HudPanel>
+          )}
         </motion.div>
 
         {/* ── Churn Rate & NRR ─────────────────────────────────────────────── */}

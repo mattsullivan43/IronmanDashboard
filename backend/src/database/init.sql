@@ -180,6 +180,17 @@ CREATE TABLE IF NOT EXISTS revenue_snapshots (
   UNIQUE KEY unique_month (month)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Action items / daily checklist
+CREATE TABLE IF NOT EXISTS action_items (
+  id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+  title VARCHAR(500) NOT NULL,
+  completed TINYINT(1) DEFAULT 0,
+  due_date DATE DEFAULT (CURDATE()),
+  priority VARCHAR(20) DEFAULT 'normal',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CHECK (priority IN ('high', 'normal', 'low'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Create indexes
 CREATE INDEX idx_transactions_date ON transactions(date);
 CREATE INDEX idx_transactions_category ON transactions(category);
@@ -193,6 +204,7 @@ CREATE INDEX idx_commissions_status ON commissions(status);
 CREATE INDEX idx_clients_product_line ON clients(product_line);
 CREATE INDEX idx_clients_status ON clients(status);
 CREATE INDEX idx_ai_usage_date ON ai_usage(date);
+CREATE INDEX idx_action_items_due_date ON action_items(due_date);
 
 -- Seed default expense categories
 INSERT IGNORE INTO expense_categories (id, name, keywords, color, is_default) VALUES

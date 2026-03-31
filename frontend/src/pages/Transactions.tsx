@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
+import { motion } from 'framer-motion';
 import {
   Plus,
   Download,
@@ -7,32 +8,25 @@ import {
   Pencil,
   Trash2,
   Tags,
-  TrendingUp,
-  TrendingDown,
-  ArrowLeftRight,
   ChevronLeft,
   ChevronRight,
   CheckSquare,
   Square,
   DollarSign,
-  BarChart3,
-  List,
 } from 'lucide-react';
 import HudPanel from '../components/ui/HudPanel';
 import MetricCard from '../components/ui/MetricCard';
-import DataTable, { Column } from '../components/ui/DataTable';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import DateRangeFilter from '../components/ui/DateRangeFilter';
-import GlowBadge from '../components/ui/GlowBadge';
 import AnimatedNumber from '../components/ui/AnimatedNumber';
 import JarvisBarChart from '../components/charts/BarChart';
 import JarvisPieChart from '../components/charts/PieChart';
 import { transactions, settings, clients as clientsApi, analytics } from '../services/api';
 import { formatCurrency, formatDate } from '../utils/format';
-import type { Transaction, ExpenseCategory, Client, ApiResponse } from '../types';
+import type { Transaction, ExpenseCategory, Client } from '../types';
 
 // ── Category color map ──────────────────────────────────────────────────────
 
@@ -56,57 +50,6 @@ function getCategoryColor(category: string, categories: ExpenseCategory[]): stri
   const found = categories.find((c) => c.name === category);
   if (found) return found.color;
   return DEFAULT_CATEGORY_COLORS[category] || '#00D4FF';
-}
-
-// ── Summary Card ────────────────────────────────────────────────────────────
-
-function SummaryCard({
-  title,
-  value,
-  icon,
-  color,
-  glowColor,
-  delay,
-}: {
-  title: string;
-  value: number;
-  icon: React.ReactNode;
-  color: string;
-  glowColor: string;
-  delay: number;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay }}
-      className="relative bg-[#0D1321]/80 backdrop-blur-xl border border-[#1A2035] rounded-lg p-5 overflow-hidden"
-    >
-      <div className={`absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[${glowColor}]/30 to-transparent`} />
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-1">
-            {title}
-          </p>
-          <AnimatedNumber
-            value={value}
-            prefix={value < 0 ? '-$' : '$'}
-            decimals={0}
-            className={`text-2xl font-bold ${color}`}
-          />
-        </div>
-        <div
-          className="p-3 rounded-lg"
-          style={{
-            backgroundColor: `${glowColor}15`,
-            boxShadow: `0 0 20px ${glowColor}20`,
-          }}
-        >
-          {icon}
-        </div>
-      </div>
-    </motion.div>
-  );
 }
 
 // ── Main Component ──────────────────────────────────────────────────────────
@@ -487,7 +430,8 @@ function AnalyticsView({ startDate, endDate }: { startDate: string; endDate: str
 
 export default function Transactions() {
   // View toggle
-  const [view, setView] = useState<'list' | 'analytics'>('list');
+  // Suppress unused warnings for features kept but hidden from UI
+  void AnalyticsView;
 
   // Data state
   const [data, setData] = useState<Transaction[]>([]);
@@ -502,21 +446,23 @@ export default function Transactions() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(100);
   const [total, setTotal] = useState(0);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  // Filters
+  // Filters — default to 12 months back
   const now = new Date();
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  const monthEnd = now.toISOString().split('T')[0];
-  const [startDate, setStartDate] = useState(monthStart);
-  const [endDate, setEndDate] = useState(monthEnd);
+  const yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+  const defaultStart = `${yearAgo.getFullYear()}-${String(yearAgo.getMonth() + 1).padStart(2, '0')}-01`;
+  const defaultEnd = now.toISOString().split('T')[0];
+  const [startDate, setStartDate] = useState(defaultStart);
+  const [endDate, setEndDate] = useState(defaultEnd);
   const [typeFilter, setTypeFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [searchText, setSearchText] = useState('');
-  const [amountMin, setAmountMin] = useState('');
-  const [amountMax, setAmountMax] = useState('');
+  const [amountMin, _setAmountMin] = useState('');
+  const [amountMax, _setAmountMax] = useState('');
+  void _setAmountMin; void _setAmountMax; // filters available but not shown in simplified UI
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -547,19 +493,21 @@ export default function Transactions() {
       const params: Record<string, string | number> = {
         page,
         limit: pageSize,
-        startDate,
-        endDate,
+        start_date: startDate,
+        end_date: endDate,
       };
       if (typeFilter) params.type = typeFilter;
       if (categoryFilter) params.category = categoryFilter;
       if (searchText) params.search = searchText;
-      if (amountMin) params.amountMin = amountMin;
-      if (amountMax) params.amountMax = amountMax;
+      if (amountMin) params.min_amount = amountMin;
+      if (amountMax) params.max_amount = amountMax;
 
-      const res: ApiResponse<Transaction[]> = await transactions.list(params);
-      const txData = Array.isArray(res?.data) ? res.data : [];
+      const res: any = await transactions.list(params);
+      // unwrapFull returns { success, data: { transactions: [...], pagination: {...} } }
+      const inner = res?.data ?? res;
+      const txData = Array.isArray(inner?.transactions) ? inner.transactions : (Array.isArray(inner) ? inner : []);
       setData(txData);
-      setTotal(res?.pagination?.total ?? txData.length);
+      setTotal(inner?.pagination?.total ?? res?.pagination?.total ?? txData.length);
     } catch (err) {
       console.error('Failed to load transactions', err);
     } finally {
@@ -570,7 +518,18 @@ export default function Transactions() {
   const loadSummary = useCallback(async () => {
     try {
       const res = await transactions.getSummary({ startDate, endDate });
-      setSummary(res ?? { totalIncome: 0, totalExpenses: 0, netIncome: 0 });
+      // Backend returns an array of monthly rows — aggregate into totals
+      if (Array.isArray(res)) {
+        const totalIncome = res.reduce((sum: number, r: any) => sum + Number(r.inflows || 0), 0);
+        const totalExpenses = res.reduce((sum: number, r: any) => sum + Number(r.outflows || 0), 0);
+        setSummary({ totalIncome, totalExpenses, netIncome: totalIncome - totalExpenses });
+      } else if (res && typeof res === 'object') {
+        setSummary({
+          totalIncome: Number(res.totalIncome) || 0,
+          totalExpenses: Number(res.totalExpenses) || 0,
+          netIncome: Number(res.netIncome) || 0,
+        });
+      }
     } catch (err) {
       console.error('Failed to load summary', err);
     }
@@ -698,14 +657,6 @@ export default function Transactions() {
     });
   };
 
-  const toggleSelectAll = () => {
-    if (selectedIds.size === data.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(data.map((t) => t.id)));
-    }
-  };
-
   const handleExport = () => {
     const params = new URLSearchParams();
     params.set('startDate', startDate);
@@ -736,417 +687,236 @@ export default function Transactions() {
     [clientList]
   );
 
-  // ── Table columns ─────────────────────────────────────────────────────────
+  // ── Derived: group by month ───────────────────────────────────────────────
 
-  const columns: Column<Transaction>[] = [
-    {
-      key: 'select',
-      header: '',
-      width: '40px',
-      render: (row) => (
-        <button onClick={() => toggleSelect(row.id)} className="text-white/40 hover:text-white/80 transition-colors">
-          {selectedIds.has(row.id) ? (
-            <CheckSquare className="w-4 h-4 text-[#00D4FF]" />
-          ) : (
-            <Square className="w-4 h-4" />
-          )}
-        </button>
-      ),
-    },
-    {
-      key: 'date',
-      header: 'Date',
-      width: '120px',
-      render: (row) => (
-        <span className="text-white/70">{formatDate(row.date, 'MMM d, yyyy')}</span>
-      ),
-    },
-    {
-      key: 'description',
-      header: 'Description',
-      render: (row) => (
-        <span className="text-white/90 font-medium truncate max-w-[300px] block">
-          {row.description}
-        </span>
-      ),
-    },
-    {
-      key: 'amount',
-      header: 'Amount',
-      align: 'right',
-      width: '140px',
-      render: (row) => (
-        <span
-          className={`font-semibold ${
-            row.type === 'income' ? 'text-[#00FF88]' : 'text-[#FF3B3B]'
-          }`}
-        >
-          {row.type === 'income' ? '+' : '-'}
-          {formatCurrency(Math.abs(row.amount), { decimals: 2 })}
-        </span>
-      ),
-    },
-    {
-      key: 'category',
-      header: 'Category',
-      width: '160px',
-      render: (row) => {
-        const color = getCategoryColor(row.category, categories);
-        return (
-          <span
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-            style={{
-              backgroundColor: `${color}15`,
-              color,
-              boxShadow: `0 0 6px ${color}30`,
-            }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ backgroundColor: color }}
-            />
-            {row.category}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'source',
-      header: 'Source',
-      width: '90px',
-      render: (row) =>
-        row.csvUploadId ? (
-          <GlowBadge status="warning" label="CSV" />
-        ) : (
-          <GlowBadge status="good" label="Manual" />
-        ),
-    },
-    {
-      key: 'actions',
-      header: 'Actions',
-      align: 'center',
-      width: '120px',
-      render: (row) => (
-        <div className="flex items-center justify-center gap-1">
-          <button
-            onClick={() => handleEditOpen(row)}
-            className="p-1.5 rounded-md text-white/30 hover:text-[#00D4FF] hover:bg-[#00D4FF]/10 transition-all"
-            title="Edit"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => setDeleteConfirm(row.id)}
-            className="p-1.5 rounded-md text-white/30 hover:text-[#FF3B3B] hover:bg-[#FF3B3B]/10 transition-all"
-            title="Delete"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => handleEditOpen(row)}
-            className="p-1.5 rounded-md text-white/30 hover:text-[#FFB800] hover:bg-[#FFB800]/10 transition-all"
-            title="Re-categorize"
-          >
-            <Tags className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ),
-    },
-  ];
+  const monthGroups = useMemo(() => {
+    const groups: Record<string, { transactions: Transaction[]; income: number; expenses: number }> = {};
+    for (const tx of data) {
+      const monthKey = tx.date ? tx.date.slice(0, 7) : 'Unknown';
+      if (!groups[monthKey]) groups[monthKey] = { transactions: [], income: 0, expenses: 0 };
+      groups[monthKey].transactions.push(tx);
+      if (tx.type === 'income') groups[monthKey].income += tx.amount;
+      else groups[monthKey].expenses += tx.amount;
+    }
+    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
+  }, [data]);
+
+  // Category spending totals
+  const categoryTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const tx of data) {
+      if (tx.type === 'expense') {
+        const cat = tx.category || 'Miscellaneous';
+        totals[cat] = (totals[cat] || 0) + tx.amount;
+      }
+    }
+    return Object.entries(totals).sort(([, a], [, b]) => b - a);
+  }, [data]);
+
+  // Inline category editing
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+
+  const handleInlineCategoryChange = async (txId: string, newCategory: string) => {
+    try {
+      await transactions.bulkCategorize({ ids: [txId], category: newCategory });
+      setEditingCategoryId(null);
+      loadTransactions();
+      loadSummary();
+    } catch { toast.error('Failed to update category'); }
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   const net = summary.totalIncome - summary.totalExpenses;
 
   return (
-    <div className="space-y-6">
-      {/* Page header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">Transactions</h1>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" icon={<Download className="w-4 h-4" />} onClick={handleExport}>Export</Button>
+          <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={handleAddOpen}>Add</Button>
+        </div>
+      </div>
+
+      {/* Credits / Debits summary */}
+      <div className="flex items-center gap-8 px-5 py-3 bg-[#0D1321]/80 border border-[#1A2035] rounded-lg">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            Transaction Ledger
-          </h1>
-          <p className="text-sm text-white/40 mt-1">
-            Financial transaction monitoring and management
-          </p>
+          <span className="text-[10px] uppercase tracking-wider text-white/40 block">Credits</span>
+          <span className="text-lg font-mono font-bold text-[#00FF88]">{formatCurrency(summary.totalIncome, { decimals: 0 })}</span>
         </div>
-        <div className="flex items-center gap-3">
-          {/* View Toggle */}
-          <div className="flex items-center bg-[#0D1321]/80 border border-[#1A2035] rounded-lg p-0.5">
-            <button
-              onClick={() => setView('list')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all ${
-                view === 'list'
-                  ? 'bg-[#00D4FF]/15 text-[#00D4FF] shadow-[0_0_10px_rgba(0,212,255,0.2)]'
-                  : 'text-white/40 hover:text-white/60'
-              }`}
-            >
-              <List className="w-3.5 h-3.5" />
-              List
-            </button>
-            <button
-              onClick={() => setView('analytics')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-all ${
-                view === 'analytics'
-                  ? 'bg-[#00D4FF]/15 text-[#00D4FF] shadow-[0_0_10px_rgba(0,212,255,0.2)]'
-                  : 'text-white/40 hover:text-white/60'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              Analytics
-            </button>
-          </div>
-          {view === 'list' && (
-            <>
-              <Button variant="ghost" size="sm" icon={<Download className="w-4 h-4" />} onClick={handleExport}>
-                Export CSV
-              </Button>
-              <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4" />} onClick={handleAddOpen}>
-                Add Transaction
-              </Button>
-            </>
-          )}
+        <div>
+          <span className="text-[10px] uppercase tracking-wider text-white/40 block">Debits</span>
+          <span className="text-lg font-mono font-bold text-[#FF3B3B]">{formatCurrency(summary.totalExpenses, { decimals: 0 })}</span>
         </div>
-      </motion.div>
-
-      {/* Date Range (shared between views) */}
-      {view === 'analytics' && (
-        <HudPanel title="Date Range" delay={0.1}>
-          <DateRangeFilter
-            startDate={startDate}
-            endDate={endDate}
-            onRangeChange={handleDateRangeChange}
-          />
-        </HudPanel>
-      )}
-
-      {/* Analytics View */}
-      {view === 'analytics' && (
-        <AnalyticsView startDate={startDate} endDate={endDate} />
-      )}
-
-      {/* List View */}
-      {view === 'list' && (
-        <>
-      {/* Monthly Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SummaryCard
-          title="Total Inflows"
-          value={summary.totalIncome}
-          icon={<TrendingUp className="w-5 h-5 text-[#00FF88]" />}
-          color="text-[#00FF88]"
-          glowColor="#00FF88"
-          delay={0}
-        />
-        <SummaryCard
-          title="Total Outflows"
-          value={summary.totalExpenses}
-          icon={<TrendingDown className="w-5 h-5 text-[#FF3B3B]" />}
-          color="text-[#FF3B3B]"
-          glowColor="#FF3B3B"
-          delay={0.1}
-        />
-        <SummaryCard
-          title="Net"
-          value={Math.abs(net)}
-          icon={<ArrowLeftRight className="w-5 h-5" style={{ color: net >= 0 ? '#00D4FF' : '#FF3B3B' }} />}
-          color={net >= 0 ? 'text-[#00D4FF]' : 'text-[#FF3B3B]'}
-          glowColor={net >= 0 ? '#00D4FF' : '#FF3B3B'}
-          delay={0.2}
-        />
+        <div>
+          <span className="text-[10px] uppercase tracking-wider text-white/40 block">Net</span>
+          <span className={`text-lg font-mono font-bold ${net >= 0 ? 'text-[#00D4FF]' : 'text-[#FF3B3B]'}`}>
+            {net >= 0 ? '+' : '-'}{formatCurrency(Math.abs(net), { decimals: 0 })}
+          </span>
+        </div>
       </div>
 
       {/* Filters */}
-      <HudPanel title="Filters" delay={0.15}>
-        <div className="space-y-4">
-          <DateRangeFilter
-            startDate={startDate}
-            endDate={endDate}
-            onRangeChange={handleDateRangeChange}
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <Select
-              options={[
-                { value: '', label: 'All Types' },
-                { value: 'income', label: 'Income' },
-                { value: 'expense', label: 'Expense' },
-              ]}
-              value={typeFilter}
-              onChange={(e) => {
-                setTypeFilter(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Type"
-            />
-            <Select
-              options={[{ value: '', label: 'All Categories' }, ...categoryOptions]}
-              value={categoryFilter}
-              onChange={(e) => {
-                setCategoryFilter(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Category"
-            />
-            <Input
-              placeholder="Min amount"
-              type="number"
-              value={amountMin}
-              onChange={(e) => {
-                setAmountMin(e.target.value);
-                setPage(1);
-              }}
-              icon={<DollarSign className="w-4 h-4" />}
-            />
-            <Input
-              placeholder="Max amount"
-              type="number"
-              value={amountMax}
-              onChange={(e) => {
-                setAmountMax(e.target.value);
-                setPage(1);
-              }}
-              icon={<DollarSign className="w-4 h-4" />}
-            />
-            <Input
-              placeholder="Search description..."
-              value={searchText}
-              onChange={(e) => {
-                setSearchText(e.target.value);
-                setPage(1);
-              }}
-              icon={<Search className="w-4 h-4" />}
-            />
-          </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <DateRangeFilter startDate={startDate} endDate={endDate} onRangeChange={handleDateRangeChange} />
+        <Select
+          options={[{ value: '', label: 'All Types' }, { value: 'income', label: 'Credits' }, { value: 'expense', label: 'Debits' }]}
+          value={typeFilter}
+          onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
+          className="!w-32"
+        />
+        <Select
+          options={[{ value: '', label: 'All Categories' }, ...categoryOptions]}
+          value={categoryFilter}
+          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+          className="!w-44"
+        />
+        <Input
+          placeholder="Search..."
+          value={searchText}
+          onChange={(e) => { setSearchText(e.target.value); setPage(1); }}
+          icon={<Search className="w-4 h-4" />}
+          className="!w-48"
+        />
+        <Button variant="ghost" size="sm" icon={<Tags className="w-3.5 h-3.5" />} onClick={async () => {
+          try {
+            const result = await transactions.recategorize();
+            toast.success(`Re-categorized ${result.recategorized} of ${result.total}`);
+            loadTransactions(); loadSummary();
+          } catch { toast.error('Failed'); }
+        }}>Auto-Categorize</Button>
+      </div>
+
+      {/* Category Spending Breakdown */}
+      {categoryTotals.length > 0 && !categoryFilter && (
+        <div className="flex items-center gap-3 flex-wrap px-4 py-3 bg-[#0D1321]/60 border border-[#1A2035] rounded-lg">
+          <span className="text-[10px] uppercase tracking-wider text-white/40">Spending by category:</span>
+          {categoryTotals.map(([cat, amount]) => (
+            <button
+              key={cat}
+              onClick={() => { setCategoryFilter(cat); setPage(1); }}
+              className="flex items-center gap-1.5 px-2 py-1 rounded text-xs hover:bg-white/5 transition-colors"
+            >
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: getCategoryColor(cat, categories) }} />
+              <span className="text-white/70">{cat}</span>
+              <span className="text-white/40 font-mono">{formatCurrency(amount, { decimals: 0 })}</span>
+            </button>
+          ))}
         </div>
-      </HudPanel>
+      )}
 
       {/* Bulk Actions */}
-      <AnimatePresence>
-        {selectedIds.size > 0 && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="flex items-center gap-4 px-5 py-3 bg-[#00D4FF]/5 border border-[#00D4FF]/20 rounded-lg">
-              <span className="text-sm text-[#00D4FF] font-medium">
-                {selectedIds.size} selected
-              </span>
-              <div className="flex items-center gap-2 flex-1">
-                <Select
-                  options={categoryOptions}
-                  value={bulkCategory}
-                  onChange={(e) => setBulkCategory(e.target.value)}
-                  placeholder="Re-categorize to..."
-                  className="max-w-[220px]"
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon={<Tags className="w-3.5 h-3.5" />}
-                  onClick={handleBulkCategorize}
-                  disabled={!bulkCategory}
-                >
-                  Apply
-                </Button>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
-                Clear
-              </Button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Transaction Table */}
-      <HudPanel title="Transactions" delay={0.2}>
-        {/* Select all toggle */}
-        <div className="flex items-center justify-between mb-3 px-1">
-          <button
-            onClick={toggleSelectAll}
-            className="flex items-center gap-2 text-xs text-white/40 hover:text-white/70 transition-colors"
-          >
-            {selectedIds.size === data.length && data.length > 0 ? (
-              <CheckSquare className="w-3.5 h-3.5 text-[#00D4FF]" />
-            ) : (
-              <Square className="w-3.5 h-3.5" />
-            )}
-            Select all
-          </button>
-          <span className="text-xs text-white/30 font-mono">
-            {total} total records
-          </span>
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-[#00D4FF]/5 border border-[#00D4FF]/20 rounded-lg">
+          <span className="text-xs text-[#00D4FF]">{selectedIds.size} selected</span>
+          <Select options={categoryOptions} value={bulkCategory} onChange={(e) => setBulkCategory(e.target.value)} placeholder="Categorize as..." className="!w-44" />
+          <Button variant="secondary" size="sm" onClick={handleBulkCategorize} disabled={!bulkCategory}>Apply</Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>Clear</Button>
         </div>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-              className="w-8 h-8 border-2 border-[#00D4FF]/20 border-t-[#00D4FF] rounded-full"
-            />
-          </div>
-        ) : (
-          <DataTable
-            columns={columns}
-            data={data}
-            keyExtractor={(row) => row.id}
-            emptyMessage="No transactions found, sir. Adjust your filters or add a new record."
-          />
-        )}
-
-        {/* Pagination */}
-        <div className="flex items-center justify-between mt-4 pt-4 border-t border-[#1A2035]/40">
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-white/40">Rows per page:</span>
-            <Select
-              options={[
-                { value: '10', label: '10' },
-                { value: '25', label: '25' },
-                { value: '50', label: '50' },
-                { value: '100', label: '100' },
-              ]}
-              value={String(pageSize)}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-              className="!w-20"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-white/40 font-mono">
-              Page {page} of {totalPages}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<ChevronLeft className="w-4 h-4" />}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-            >
-              Prev
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<ChevronRight className="w-4 h-4" />}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      </HudPanel>
-
-        </>
       )}
+
+      {/* Transactions grouped by month */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }} className="w-6 h-6 border-2 border-[#00D4FF]/20 border-t-[#00D4FF] rounded-full" />
+        </div>
+      ) : monthGroups.length === 0 ? (
+        <div className="text-center py-12 text-white/30">No transactions found.</div>
+      ) : (
+        monthGroups.map(([month, group]) => {
+          const monthDate = new Date(month + '-01');
+          const monthLabel = formatDate(monthDate, 'MMMM yyyy');
+          const monthNet = group.income - group.expenses;
+          return (
+            <div key={month} className="bg-[#0D1321]/80 border border-[#1A2035] rounded-lg overflow-hidden">
+              {/* Month header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[#1A2035]/40 bg-[#0D1321]">
+                <span className="text-sm font-semibold text-white/80">{monthLabel}</span>
+                <div className="flex items-center gap-4 text-xs font-mono">
+                  <span className="text-[#00FF88]">+{formatCurrency(group.income, { decimals: 0 })}</span>
+                  <span className="text-[#FF3B3B]">-{formatCurrency(group.expenses, { decimals: 0 })}</span>
+                  <span className={monthNet >= 0 ? 'text-[#00D4FF]' : 'text-[#FF3B3B]'}>
+                    Net: {monthNet >= 0 ? '+' : '-'}{formatCurrency(Math.abs(monthNet), { decimals: 0 })}
+                  </span>
+                </div>
+              </div>
+              {/* Transaction rows */}
+              <table className="w-full">
+                <tbody>
+                  {group.transactions.map((tx) => (
+                    <tr key={tx.id} className="border-b border-[#1A2035]/20 hover:bg-white/[0.02] transition-colors">
+                      <td className="pl-4 py-2 w-8">
+                        <button onClick={() => toggleSelect(tx.id)} className="text-white/30 hover:text-white/60">
+                          {selectedIds.has(tx.id) ? <CheckSquare className="w-3.5 h-3.5 text-[#00D4FF]" /> : <Square className="w-3.5 h-3.5" />}
+                        </button>
+                      </td>
+                      <td className="py-2 w-24 text-xs text-white/50 font-mono">{formatDate(tx.date, 'MMM d')}</td>
+                      <td className="py-2 text-sm text-white/80 truncate max-w-[400px]">{tx.description}</td>
+                      <td className="py-2 w-28 text-right font-mono text-sm font-semibold pr-4">
+                        <span className={tx.type === 'income' ? 'text-[#00FF88]' : 'text-[#FF3B3B]'}>
+                          {tx.type === 'income' ? '+' : '-'}{formatCurrency(Math.abs(tx.amount), { decimals: 2 })}
+                        </span>
+                      </td>
+                      <td className="py-2 w-36">
+                        {editingCategoryId === tx.id ? (
+                          <select
+                            autoFocus
+                            className="bg-[#0D1321] border border-[#00D4FF]/40 text-white text-xs rounded px-2 py-1 outline-none"
+                            defaultValue={tx.category || 'Miscellaneous'}
+                            onChange={(e) => handleInlineCategoryChange(tx.id, e.target.value)}
+                            onBlur={() => setEditingCategoryId(null)}
+                          >
+                            {categoryOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                            <option value="Miscellaneous">Miscellaneous</option>
+                          </select>
+                        ) : (
+                          <button
+                            onClick={() => setEditingCategoryId(tx.id)}
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded hover:bg-white/5 transition-colors"
+                            title="Click to change category"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getCategoryColor(tx.category, categories) }} />
+                            <span className="text-white/60">{tx.category || 'Miscellaneous'}</span>
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-2 w-16 pr-4">
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => handleEditOpen(tx)} className="p-1 text-white/20 hover:text-[#00D4FF] transition-colors" title="Edit">
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button onClick={() => setDeleteConfirm(tx.id)} className="p-1 text-white/20 hover:text-[#FF3B3B] transition-colors" title="Delete">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })
+      )}
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between">
+        <Select
+          options={[{ value: '25', label: '25' }, { value: '50', label: '50' }, { value: '100', label: '100' }]}
+          value={String(pageSize)}
+          onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+          className="!w-20"
+        />
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-white/40 font-mono">{page}/{totalPages}</span>
+          <Button variant="ghost" size="sm" icon={<ChevronLeft className="w-4 h-4" />} onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>{''}</Button>
+          <Button variant="ghost" size="sm" icon={<ChevronRight className="w-4 h-4" />} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>{''}</Button>
+        </div>
+      </div>
 
       {/* Add / Edit Transaction Modal */}
       <Modal
